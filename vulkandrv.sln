@@ -1,12 +1,14 @@
 ﻿
-Microsoft Visual Studio Solution File, Format Version 11.00
-# Visual Studio 2010
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.31321.278
+MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "vulkandrv", "vulkandrv\vulkandrv.vcxproj", "{8EFD8EED-00B7-49BA-A8B1-E74D6255796A}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
-		Deus Ex Debug|Win32 = Deus Ex Debug|Win32
-		Deus Ex Release|Win32 = Deus Ex Release|Win32
+		DeusEx Debug|Win32 = DeusEx Debug|Win32
+		DeusEx Release|Win32 = DeusEx Release|Win32
 		Rune 1.00 Debug|Win32 = Rune 1.00 Debug|Win32
 		Rune 1.00 Release|Win32 = Rune 1.00 Release|Win32
 		Rune Debug|Win32 = Rune Debug|Win32
@@ -17,10 +19,10 @@ Global
 		Unreal Tournament Release|Win32 = Unreal Tournament Release|Win32
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{8EFD8EED-00B7-49BA-A8B1-E74D6255796A}.Deus Ex Debug|Win32.ActiveCfg = Deus Ex Debug|Win32
-		{8EFD8EED-00B7-49BA-A8B1-E74D6255796A}.Deus Ex Debug|Win32.Build.0 = Deus Ex Debug|Win32
-		{8EFD8EED-00B7-49BA-A8B1-E74D6255796A}.Deus Ex Release|Win32.ActiveCfg = Deus Ex Release|Win32
-		{8EFD8EED-00B7-49BA-A8B1-E74D6255796A}.Deus Ex Release|Win32.Build.0 = Deus Ex Release|Win32
+		{8EFD8EED-00B7-49BA-A8B1-E74D6255796A}.DeusEx Debug|Win32.ActiveCfg = DeusEx Debug|Win32
+		{8EFD8EED-00B7-49BA-A8B1-E74D6255796A}.DeusEx Debug|Win32.Build.0 = DeusEx Debug|Win32
+		{8EFD8EED-00B7-49BA-A8B1-E74D6255796A}.DeusEx Release|Win32.ActiveCfg = DeusEx Release|Win32
+		{8EFD8EED-00B7-49BA-A8B1-E74D6255796A}.DeusEx Release|Win32.Build.0 = DeusEx Release|Win32
 		{8EFD8EED-00B7-49BA-A8B1-E74D6255796A}.Rune 1.00 Debug|Win32.ActiveCfg = Rune 1.00 Debug|Win32
 		{8EFD8EED-00B7-49BA-A8B1-E74D6255796A}.Rune 1.00 Debug|Win32.Build.0 = Rune 1.00 Debug|Win32
 		{8EFD8EED-00B7-49BA-A8B1-E74D6255796A}.Rune 1.00 Release|Win32.ActiveCfg = Rune 1.00 Release|Win32
@@ -40,5 +42,8 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {CF8A5ED0-7EAB-4312-87AC-758912DCA1D4}
 	EndGlobalSection
 EndGlobal
