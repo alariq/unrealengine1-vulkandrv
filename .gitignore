@@ -1,0 +1,6 @@
+.vs/
+_work/
+# this is a symlink
+games
+games/
+packages/
