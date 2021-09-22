@@ -1,0 +1,13 @@
+mkdir "$(GAMEDIR)\system\d3d10drv"
+xcopy /F "$(InputDir)*.fx" "$(GAMEDIR)\system\d3d10drv"
+xcopy /F  "$(InputDir)*.fxh" "$(GAMEDIR)\system\d3d10drv"
+xcopy /F "$(InputDir)*.png" "$(GAMEDIR)\system\d3d10drv"
+xcopy /F "$(TargetPath) " "$(GAMEDIR)\system\"
+
+mkdir "$(SolutionDir)\packages\$(GAMENAME)"
+mkdir "$(SolutionDir)\packages\$(GAMENAME)\d3d10drv"
+xcopy /F "$(InputDir)*.fx" "$(SolutionDir)\packages\$(GAMENAME)\d3d10drv"
+xcopy /F "$(InputDir)*.fxh" "$(SolutionDir)\packages\$(GAMENAME)\d3d10drv"
+xcopy /F "$(InputDir)*.png" "$(SolutionDir)\packages\$(GAMENAME)\d3d10drv"
+xcopy /F "$(InputDir)\$(SolutionName).int" "$(SolutionDir)\packages\$(GAMENAME)"
+xcopy /F "$(TargetPath)"  "$(SolutionDir)\packages\$(GAMENAME)"

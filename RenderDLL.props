@@ -1,0 +1,40 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.30319.1</_ProjectFileVersion>
+    <OutDir>$(SolutionDir)\_work\bin\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)\_work\intermediate\$(Configuration)\$(ProjectName)\</IntDir>
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>../games/$(GAMENAME)/engine/inc;../games/$(GAMENAME)/core/inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_REALLY_WANT_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <StructMemberAlignment>4Bytes</StructMemberAlignment>
+      <TreatWChar_tAsBuiltInType>false</TreatWChar_tAsBuiltInType>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>../games/$(GAMENAME)/engine/lib/engine.lib;../games/$(GAMENAME)/core/lib/core.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PostBuildEvent>
+      <Command>mkdir "$(GAMEDIR)\system\$(ProjectName)"
+          xcopy /F /Y "%(RootDir)%(Directory)*.fx" "$(GAMEDIR)\system\$(ProjectName)"
+          xcopy /F /Y "%(RootDir)%(Directory)*.fxh" "$(GAMEDIR)\system\$(ProjectName)"
+          xcopy /F /Y "%(RootDir)%(Directory)*.png" "$(GAMEDIR)\system\$(ProjectName)"
+          xcopy /F /Y "$(TargetPath) " "$(GAMEDIR)\system\"
+
+mkdir "$(SolutionDir)\packages\$(GAMENAME)"
+mkdir "$(SolutionDir)\packages\$(GAMENAME)\$(ProjectName)"
+          xcopy /F /Y "%(RootDir)%(Directory)*.fx" "$(SolutionDir)\packages\$(GAMENAME)\$(ProjectName)"
+          xcopy /F /Y "%(RootDir)%(Directory)*.fxh" "$(SolutionDir)\packages\$(GAMENAME)\$(ProjectName)"
+          xcopy /F /Y "%(RootDir)%(Directory)*.png" "$(SolutionDir)\packages\$(GAMENAME)\$(ProjectName)"
+          xcopy /F /Y "%(RootDir)%(Directory)\$(ProjectName).int" "$(SolutionDir)\packages\$(GAMENAME)"
+          xcopy /F /Y "$(TargetPath)"  "$(SolutionDir)\packages\$(GAMENAME)"
+</Command>
+    </PostBuildEvent>
+    <PreBuildEvent>
+      <Command>
+      </Command>
+    </PreBuildEvent>
+  </ItemDefinitionGroup>
+</Project>

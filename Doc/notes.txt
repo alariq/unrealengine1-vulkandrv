@@ -1,0 +1,57 @@
+bugs:
+
+committing draw call before clearing z buffer
+
+stride of dynamic direct3d textures
+
+lightmap textures not being allowed to be read outside vclamp
+
+lightmap textures needing edge pixels repeated outside u/vclamp otherwise artifacts appear where garbage padding gets sampled
+update: solved by making texture u/v clamp sized, scaling texture coordinates and setting SUBRESOURCE_DATA stride to skip uclamp garbage
+
+tiles needing depth (z/w)
+
+corruption in nali castle intro (need to always clear screen)
+
+deus ex security cams having geometry clip through background (commit before switching viewports)
+
+deus ex dialogue letterbox wrong (no proper setscenenode() call, need to manually set from drawTile())
+
+deus ex not showing all resolutions (only send 16 highest ones)
+
+masked textures not having proper polyflags (need to recache if masked while they weren't originally)
+
+runestone particles looking blown out and chunky: game sends color > 1
+
+1px edges along masked textures (unreal 1 skybox hills). Was doing alpha testing with filtered sampler; noticed the lines in other renderers after switching off masking for a skybox texture.
+
+added anisotropic filtered pass after point sampled pass for better looking grates etc.
+
+flickering fog: textures can be updated within a frame and even while currently bound; commit buffers first if updating bound texture
+
+geometry though mirror in dx generator office: need to use blendstate for invis instead of discard.
+
+almost maxint undrawnindices (led to crash in draw()): negative amount of indices calculated in indextrianglefan as less than 3 points were submitted
+
+darkening when detail textures are blended in: original game drew with blendmode src*dest_color + dest*src_color = 2*src*dest; had left out this factor 2 in the shader
+
+z-fighting. found close z value for world geometry, set as new near clipping value. Unreal and UT draw weapons within this: detect (1st time z<max weapon z), and clear depth buffer. Needed to find value that captures all weapon vertices. Went with z=12.
+to then draw the weapon and tiles correctly, vertex shader moves <znear tile/model vertices into valid region.
+
+masked billboards having seams in MSAA: centroid sampling for alpha test
+
+rune player blood black squares (and alpha to coverage not working, for example, underwater): ignore flash effect alpha component
+
+unreal s3tc textures pack texture creation errors: texture info size not correctly set (so end up with too many mip levels for the size), fix by comparing texture size to mip0 size; to fix, multiply stride (which i use as the size) * (size/mip0size) and divide scale by it
+
+creating device twice leads to framerate increase... noticed this because switching to fullscreen and back gained that increase too, somehow seems to be the same thing at work.
+
+4096x4096 textures crashed: report 13 mipmaps while only 12 can exist. fix: do not use lowest (non existant) mipmap level
+
+explosion decals (gouraudpolygons) not appearing. fix: disable culling.
+
+white pixels on distant terrain due to detail texturing: set origPos to use centroid sampling
+
+better looking skies in d3d renderer with usemultipass = false and glide renderer. reason: transparent layer under sky is colored with lightmap, because of multipass rendering this lightmap is applied in a separate modulation pass instead of only modulated with the transparent layer's diffuse texture. solution: go from blend equation (light*diffuse)+(1-light*diffuse)*dest to (light*diffuse)+((1-diffuse)*light*dest by using dual source blending src1 = (1-diffuse)*light.
+
+geometry glitching on weapon fire: shells and translocator were detected as weapon model, triggering z-clear after which still world geometry was drawn. fix: switched to inverted z-buffer (far = 0, near = 1) with zNear low enough to accomodate UT weapon models in widescreen; took out all other hackish perspective transform modification
