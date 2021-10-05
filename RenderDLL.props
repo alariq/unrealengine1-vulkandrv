@@ -30,6 +30,8 @@ mkdir "$(SolutionDir)\packages\$(GAMENAME)\$(ProjectName)"
           xcopy /F /Y "%(RootDir)%(Directory)*.png" "$(SolutionDir)\packages\$(GAMENAME)\$(ProjectName)"
           xcopy /F /Y "%(RootDir)%(Directory)\$(ProjectName).int" "$(SolutionDir)\packages\$(GAMENAME)"
           xcopy /F /Y "$(TargetPath)"  "$(SolutionDir)\packages\$(GAMENAME)"
+          echo "Just for test"
+          xcopy /F /Y "$(TargetPath)"  "d:\ut1999\System\"
 </Command>
     </PostBuildEvent>
     <PreBuildEvent>

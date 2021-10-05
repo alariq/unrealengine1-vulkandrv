@@ -1,3 +1,7 @@
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+
+#include "vulkan_common.h"
 #include "rhi.h"
 #include "vulkan_device.h"
 #include "utils/logging.h"
@@ -6,7 +10,6 @@
 #include <cassert>
 #include <memory>
 #include <vector>
-#include <vulkan/vulkan_core.h>
 
 #define VK_CHECK(x){\
     VkResult r = (x);\
@@ -39,8 +42,8 @@ template <typename R>
 const typename ResImplType<R>::Type* ResourceCast(const R* obj) {
 	return static_cast<const typename ResImplType<R>::Type*>(obj);
 }
+#if defined(USE_Format_TRANSLATION)
 ////////////////////////////////////////////////////////////////////////////////
-
 VkFormat translate(RHIFormat fmt) {
 	static VkFormat formats[] = {
         VK_FORMAT_UNDEFINED,
@@ -81,7 +84,22 @@ RHIFormat untranslate(VkFormat fmt) {
     }
 }
 
-VkImageViewType translate(RHIImageViewType type) {
+VkFormat translate_f(RHIFormat fmt) {
+	return translate(fmt);
+}
+RHIFormat untranslate_f(VkFormat fmt) {
+	return untranslate(fmt);
+}
+#else
+VkFormat translate_f(RHIFormat fmt) {
+	return fmt;
+}
+RHIFormat untranslate_f(VkFormat fmt) {
+	return fmt;
+}
+#endif
+
+VkImageViewType translate(RHIImageViewType::Value type) {
 	static VkImageViewType types[] = {
 		VK_IMAGE_VIEW_TYPE_1D,
 		VK_IMAGE_VIEW_TYPE_2D,
@@ -111,7 +129,7 @@ VkSampleCountFlagBits translate_num_samples(int num_samples) {
 	}
 }
 
-VkAttachmentLoadOp translate(RHIAttachmentLoadOp load_op) {
+VkAttachmentLoadOp translate(RHIAttachmentLoadOp::Value load_op) {
 	static VkAttachmentLoadOp ops[] = {
 		VK_ATTACHMENT_LOAD_OP_LOAD,
 		VK_ATTACHMENT_LOAD_OP_CLEAR,
@@ -121,7 +139,7 @@ VkAttachmentLoadOp translate(RHIAttachmentLoadOp load_op) {
 	return ops[(uint32_t)load_op];
 }
 
-VkAttachmentStoreOp translate(RHIAttachmentStoreOp store_op) {
+VkAttachmentStoreOp translate(RHIAttachmentStoreOp::Value store_op) {
 	static VkAttachmentStoreOp ops[] = {
 		VK_ATTACHMENT_STORE_OP_STORE,
 		VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -130,6 +148,7 @@ VkAttachmentStoreOp translate(RHIAttachmentStoreOp store_op) {
 	return ops[(uint32_t)store_op];
 }
 
+#if defined(USE_ImageLayout_TRANSLATION)
 VkImageLayout translate(RHIImageLayout layout) {
 	static VkImageLayout layouts[] = {
 		VK_IMAGE_LAYOUT_UNDEFINED,
@@ -145,7 +164,16 @@ VkImageLayout translate(RHIImageLayout layout) {
 	assert((uint32_t)layout< countof(layouts));
 	return layouts[(uint32_t)layout];
 }
+VkImageLayout translate_il(RHIImageLayout layout) {
+	return translate(layout);
+}
+#else
+VkImageLayout translate_il(RHIImageLayout layout) {
+	return layout;
+}
+#endif
 
+#if defined(USE_PipelineStageFlags_TRANSLATION)
 VkPipelineStageFlags translate(RHIPipelineStageFlags pipeline_stage) {
 	switch (pipeline_stage) {
 	case RHIPipelineStageFlags::kTopOfPipe: return VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
@@ -170,7 +198,16 @@ VkPipelineStageFlags translate(RHIPipelineStageFlags pipeline_stage) {
 			return VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
 	};
 }
+VkPipelineStageFlags translate_ps(RHIPipelineStageFlags pipeline_stage) {
+	return translate(pipeline_stage);
+}
+#else
+VkPipelineStageFlags translate_ps(RHIPipelineStageFlags pipeline_stage) {
+	return pipeline_stage;
+}
+#endif
 
+#if defined(USE_ACCESS_FLAGS_TRANSLATION)
 VkAccessFlags translate(RHIAccessFlags access_flags) {
 	switch (access_flags) {
 	case RHIAccessFlags::kIndirectCommandRead: return VK_ACCESS_INDIRECT_COMMAND_READ_BIT ;
@@ -195,7 +232,16 @@ VkAccessFlags translate(RHIAccessFlags access_flags) {
 			return VK_ACCESS_FLAG_BITS_MAX_ENUM;
 	};
 }
+VkAccessFlags translate_af(RHIAccessFlags access_flags) {
+	return translate(access_flags);
+}
+#else
+VkAccessFlags translate_af(RHIAccessFlags access_flags) {
+	return access_flags;
+}
+#endif
 
+#if 0
 VkDependencyFlags translate_dependency_flags(uint32_t dep_flags) {
 	uint32_t vk_dep_flags = (dep_flags & (uint32_t)RHIDependencyFlags::kByRegion) ? VK_DEPENDENCY_BY_REGION_BIT : 0;
 	vk_dep_flags |= (dep_flags & (uint32_t)RHIDependencyFlags::kDeviceGroup)? VK_DEPENDENCY_DEVICE_GROUP_BIT: 0;
@@ -216,7 +262,9 @@ VkShaderStageFlagBits translate(RHIShaderStageFlags stage_flags) {
 		return VK_SHADER_STAGE_FLAG_BITS_MAX_ENUM;
 	}
 };
+#endif
 
+#if defined(USE_PipelineBindPoint_TRANSLATION) 
 VkPipelineBindPoint translate(RHIPipelineBindPoint pipeline_bind_point) {
 	static VkPipelineBindPoint bind_points[] = {
 		VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -226,18 +274,43 @@ VkPipelineBindPoint translate(RHIPipelineBindPoint pipeline_bind_point) {
 	assert((uint32_t)pipeline_bind_point < countof(bind_points));
 	return bind_points[(uint32_t)pipeline_bind_point];
 }
+VkPipelineBindPoint translate_pbp(RHIPipelineBindPoint pipeline_bind_point) {
+	return translate(pipeline_bind_point);
+}
+#else
+VkPipelineBindPoint translate_pbp(RHIPipelineBindPoint pipeline_bind_point) {
+	return pipeline_bind_point;
+}
+#endif
 
+#if defined(USE_ImageAspectFlags_TRANSLATION)
 VkImageAspectFlags translate_image_aspect(uint32_t bits) {
 	VkImageAspectFlags rv = (bits & (uint32_t)RHIImageAspectFlags::kColor) ? VK_IMAGE_ASPECT_COLOR_BIT: 0;
 	rv |= (bits & (uint32_t)RHIImageAspectFlags::kDepth) ? VK_IMAGE_ASPECT_DEPTH_BIT : 0;
 	rv |= (bits & (uint32_t)RHIImageAspectFlags::kStencil) ? VK_IMAGE_ASPECT_STENCIL_BIT: 0;
 	return rv;
 }
+#else
+VkImageAspectFlags translate_image_aspect(uint32_t bits) {
+	return bits;
+}
+#endif
 
+#if defined(USE_VertexInputRate_TRANSLATION)
 VkVertexInputRate translate(RHIVertexInputRate input_rate) {
 	return input_rate == RHIVertexInputRate::kVertex ? VK_VERTEX_INPUT_RATE_VERTEX
 													 : VK_VERTEX_INPUT_RATE_INSTANCE;
 }
+VkVertexInputRate translate_vir(RHIVertexInputRate input_rate) {
+	return translate(input_rate);
+}
+#else
+VkVertexInputRate translate_vir(RHIVertexInputRate input_rate) {
+	return input_rate;
+}
+#endif
+
+#if 0
 VkPrimitiveTopology translate(RHIPrimitiveTopology prim_topology) {
 	switch (prim_topology) {
 	case RHIPrimitiveTopology::kPointList: return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
@@ -378,6 +451,9 @@ VkMemoryPropertyFlags translate_mem_prop(uint32_t memprop) {
     return vk_flags;
 }
 
+#endif
+
+
 ////////////// Image //////////////////////////////////////////////////
 
 void RHIImageVk::Destroy(IRHIDevice* device) {
@@ -395,6 +471,8 @@ void RHIImageViewVk::Destroy(IRHIDevice* device) {
 	RHIDeviceVk* dev = ResourceCast(device);
 	vkDestroyImageView(dev->Handle(), handle_, dev->Allocator());
 }
+
+#if 0
 
 ////////////// Frame Buffer //////////////////////////////////////////////////
 
@@ -860,10 +938,11 @@ RHIEventVk *RHIEventVk::Create(IRHIDevice *device) {
 	return event;
 }
 
+#endif
 
 ////////////// Command buffer //////////////////////////////////////////////////
 
-void Barrier(RHICmdBufVk *cb, RHIImageVk* image,
+void Barrier(VkCommandBuffer cb, RHIImageVk* image,
 			 VkPipelineStageFlags src_pipeline_stage_bits,
 			 VkPipelineStageFlags dst_pipeline_stage_bits, VkAccessFlags new_access_flags,
 			 VkImageLayout new_layout) {
@@ -892,14 +971,13 @@ void Barrier(RHICmdBufVk *cb, RHIImageVk* image,
 		image_subresource_range					// VkImageSubresourceRange                subresourceRange
 	};
 
-	vkCmdPipelineBarrier(cb->Handle(), src_pipeline_stage_bits, dst_pipeline_stage_bits, 0, 0,
+	vkCmdPipelineBarrier(cb, src_pipeline_stage_bits, dst_pipeline_stage_bits, 0, 0,
 						 nullptr, 0, nullptr, 1, &barrier_copy2present);
 
 	// warning: updating states like this is not always correct if we have differect CBs and submit
 	// them in different order
 	image->vk_access_flags_ = new_access_flags;
 	image->vk_layout_ = new_layout;
-
 }
 
 void RHICmdBufVk::BufferBarrier(IRHIBuffer *i_buffer, RHIAccessFlags src_acc_flags,
@@ -910,15 +988,15 @@ void RHICmdBufVk::BufferBarrier(IRHIBuffer *i_buffer, RHIAccessFlags src_acc_fla
     VkBufferMemoryBarrier buffer_memory_barrier = {
       VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,          // VkStructureType                        sType
       nullptr,                                          // const void                            *pNext
-      translate(src_acc_flags),                       // VkAccessFlags                          srcAccessMask
-      translate(dst_acc_fags),              // VkAccessFlags                          dstAccessMask
+      translate_af(src_acc_flags),                       // VkAccessFlags                          srcAccessMask
+      translate_af(dst_acc_fags),              // VkAccessFlags                          dstAccessMask
       VK_QUEUE_FAMILY_IGNORED,                          // uint32_t                               srcQueueFamilyIndex
       VK_QUEUE_FAMILY_IGNORED,                          // uint32_t                               dstQueueFamilyIndex
       buffer->Handle(),                       // VkBuffer                               buffer
       0,                                                // VkDeviceSize                           offset
       VK_WHOLE_SIZE                                     // VkDeviceSize                           size
     };
-	vkCmdPipelineBarrier(cb_, translate(src_stage), translate(dst_stage), 0, 0, nullptr, 1,
+	vkCmdPipelineBarrier(cb_, translate_ps(src_stage), translate_ps(dst_stage), 0, 0, nullptr, 1,
 						 &buffer_memory_barrier, 0, nullptr);
 }
 
@@ -952,11 +1030,12 @@ void RHICmdBufVk::EndRenderPass(const IRHIRenderPass *i_rp, IRHIFrameBuffer *i_f
 
 	const RHIRenderPassVk* rp = ResourceCast(i_rp);
     RHIFrameBufferVk* fb = ResourceCast(i_fb);
-    auto& attachments = fb->GetAttachments();
+	const std::vector<RHIImageViewVk*>& attachments = fb->GetAttachments();
     uint32_t i=0;
-    for(auto att : attachments) {
+	for (int i = 0; i < (int)attachments.size();++i) {
+		RHIImageViewVk* att = attachments[i];
         RHIImageVk* img = ResourceCast(att->GetImage());
-        img->vk_layout_ = translate(rp->GetFinalLayout(i));
+        img->vk_layout_ = translate_il(rp->GetFinalLayout(i));
         ++i;
     }
 }
@@ -1002,7 +1081,7 @@ void RHICmdBufVk::BindPipeline(RHIPipelineBindPoint bind_point, IRHIGraphicsPipe
     assert(is_recording_);
     const RHIGraphicsPipelineVk* pipeline = ResourceCast(i_pipeline);
 
-    vkCmdBindPipeline(cb_, translate(bind_point), pipeline->Handle());
+    vkCmdBindPipeline(cb_, translate_pbp(bind_point), pipeline->Handle());
 }
 
 void RHICmdBufVk::Draw(uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex,
@@ -1025,11 +1104,10 @@ void RHICmdBufVk::BindVertexBuffers(IRHIBuffer** i_vb, uint32_t first_binding, u
 void RHICmdBufVk::CopyBuffer(class IRHIBuffer *i_dst, uint32_t dst_offset, class IRHIBuffer *i_src,
 							uint32_t src_offset, uint32_t size) {
 
-    VkBufferCopy buffer_copy_info = {
-      .srcOffset = src_offset,                                   // VkDeviceSize                           srcOffset
-      .dstOffset = dst_offset,                                                // VkDeviceSize                           dstOffset
-      .size = size                      // VkDeviceSize                           size
-    };
+	VkBufferCopy buffer_copy_info = {};
+	buffer_copy_info.srcOffset = src_offset;// VkDeviceSize                           srcOffset
+	buffer_copy_info.dstOffset = dst_offset;// VkDeviceSize                           dstOffset
+	buffer_copy_info.size = size;         // VkDeviceSize                           size
 
     const RHIBufferVk* dst = ResourceCast(i_dst);
     const RHIBufferVk* src = ResourceCast(i_src);
@@ -1041,11 +1119,11 @@ void RHICmdBufVk::CopyBuffer(class IRHIBuffer *i_dst, uint32_t dst_offset, class
 
 void RHICmdBufVk::SetEvent(IRHIEvent* i_event, RHIPipelineStageFlags stage) {
     const RHIEventVk* event = ResourceCast(i_event); 
-    vkCmdSetEvent(cb_, event->Handle(), translate(stage));
+    vkCmdSetEvent(cb_, event->Handle(), translate_ps(stage));
 }
 void RHICmdBufVk::ResetEvent(IRHIEvent* i_event, RHIPipelineStageFlags stage) {
     const RHIEventVk* event = ResourceCast(i_event); 
-    vkCmdResetEvent(cb_, event->Handle(), translate(stage));
+    vkCmdResetEvent(cb_, event->Handle(), translate_ps(stage));
 }
 
 void RHICmdBufVk::Clear(IRHIImage* image_in, const vec4& color, uint32_t img_aspect_bits) {
@@ -1071,36 +1149,34 @@ void RHICmdBufVk::Clear(IRHIImage* image_in, const vec4& color, uint32_t img_asp
 
 void RHICmdBufVk::Barrier_ClearToPresent(IRHIImage *image_in) {
 	RHIImageVk* image = ResourceCast(image_in);
-	Barrier(this, image, VK_PIPELINE_STAGE_TRANSFER_BIT,
+	Barrier(this->Handle(), image, VK_PIPELINE_STAGE_TRANSFER_BIT,
 			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_ACCESS_MEMORY_READ_BIT,
 			VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 }
 void RHICmdBufVk::Barrier_PresentToClear(IRHIImage *image_in) {
 	RHIImageVk* image = ResourceCast(image_in);
-	Barrier(this, image, VK_PIPELINE_STAGE_TRANSFER_BIT,
+	Barrier(this->Handle(), image, VK_PIPELINE_STAGE_TRANSFER_BIT,
 			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
 			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 }
 
 void RHICmdBufVk::Barrier_PresentToDraw(IRHIImage *image_in) {
 	RHIImageVk* image = ResourceCast(image_in);
-	Barrier(this, image, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+	Barrier(this->Handle(), image, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
 			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 }
 
 void RHICmdBufVk::Barrier_DrawToPresent(IRHIImage *image_in) {
 	RHIImageVk* image = ResourceCast(image_in);
-	Barrier(this, image, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+	Barrier(this->Handle(), image, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_ACCESS_MEMORY_READ_BIT,
 			VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 }
 
+#if 0
+
 ////////////////RHI Device /////////////////////////////////////////////////////
-
-RHIDeviceVk::~RHIDeviceVk() {
-}
-
 
 // should this be mobved to command buffer class / .cpp file and just pass Device as a parameter ?
 IRHICmdBuf* RHIDeviceVk::CreateCommandBuffer(RHIQueueType queue_type) {
@@ -1334,6 +1410,8 @@ IRHIEvent *RHIDeviceVk::CreateEvent() {
 	return RHIEventVk::Create(this);
 };
 
+#endif
+
 bool RHIDeviceVk::BeginFrame() {
 	cur_frame_++;
     uint32_t frame_res_idx = cur_frame_ % GetNumBufferedFrames();
@@ -1364,7 +1442,7 @@ bool RHIDeviceVk::BeginFrame() {
 	return true;
 }
 
-bool RHIDeviceVk::Submit(IRHICmdBuf* cb_in, RHIQueueType queue_type) {
+bool RHIDeviceVk::Submit(IRHICmdBuf* cb_in, RHIQueueType::Value queue_type) {
 
 	RHICmdBufVk* cb = ResourceCast(cb_in);
     uint32_t frame_res_idx = cur_frame_ % GetNumBufferedFrames();
@@ -1430,7 +1508,7 @@ IRHIImage* RHIDeviceVk::GetCurrentSwapChainImage() {
 	return dev_.swap_chain_.images_[cur_swap_chain_img_idx_];
 }
 RHIFormat RHIDeviceVk::GetSwapChainFormat() {
-	return untranslate(dev_.swap_chain_.format_);
+	return untranslate_f(dev_.swap_chain_.format_);
 }
 IRHIImageView* RHIDeviceVk::GetSwapChainImageView(uint32_t index) {
 	assert(index < GetSwapChainSize());
@@ -1440,3 +1518,4 @@ IRHIImage* RHIDeviceVk::GetSwapChainImage(uint32_t index) {
 	assert(index < GetSwapChainSize());
 	return dev_.swap_chain_.images_[index];
 }
+

@@ -49,6 +49,21 @@
     <Filter Include="Game Headers\Nerf">
       <UniqueIdentifier>{d48c39d6-eb25-47d3-806e-3010531e10fb}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\utils">
+      <UniqueIdentifier>{11334a75-089d-46c3-9095-af3365c8d80f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\glad">
+      <UniqueIdentifier>{59f6bf2c-7a05-4371-be26-00c48830fe72}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\utils">
+      <UniqueIdentifier>{1357ff56-ff4f-4c35-89d5-c4a2cd58af21}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\flext">
+      <UniqueIdentifier>{6be82c6e-49b6-49b4-8bf6-8885fcfc66ec}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\flext">
+      <UniqueIdentifier>{35c96859-071e-4bb1-a09f-eb8f5c531f71}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="doxymain.h">
@@ -1776,6 +1791,27 @@
     <ClInclude Include="resource.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="glad\vulkan.h">
+      <Filter>Header Files\glad</Filter>
+    </ClInclude>
+    <ClInclude Include="utils\macros.h">
+      <Filter>Header Files\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="utils\logging.h">
+      <Filter>Header Files\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="rhi.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="utils\vec.h">
+      <Filter>Header Files\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="vulkan_rhi.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vulkan_common.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="res.rc">
@@ -1787,6 +1823,15 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="vulkandrv.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="utils\logging.cpp">
+      <Filter>Source Files\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="utils\vec.cpp">
+      <Filter>Source Files\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="vulkan_rhi.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

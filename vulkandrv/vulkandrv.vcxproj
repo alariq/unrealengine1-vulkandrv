@@ -75,7 +75,8 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v100</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
+    <EnableASAN>false</EnableASAN>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Unreal Gold Release|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
@@ -272,21 +273,22 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">
     <ClCompile>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;_USRDLL;VULKANDRV_EXPORTS;D3D10DRV_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <MinimalRebuild>true</MinimalRebuild>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;_USRDLL;VULKANDRV_EXPORTS;PLATFORM_WINDOWS;_CRT_SECURE_NO_WARNINGS;VK_USE_PLATFORM_WIN32_KHR;VK_PROTOTYPES;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PrecompiledHeader>
       </PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
-      <AdditionalIncludeDirectories>../../dxsdk-legacy/includes;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>.\games\UnrealTournament\Core\Inc;..\..\..\3rdparty\vulkansdk\1.2.189.2\Include;./;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <StructMemberAlignment>Default</StructMemberAlignment>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <TargetMachine>MachineX86</TargetMachine>
+      <AdditionalDependencies>..\..\..\3rdparty\vulkansdk\1.2.189.2\Lib32\vulkan-1.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Release|Win32'">
     <ClCompile>
-      <PreprocessorDefinitions>WIN32;_WINDOWS;_USRDLL;VULKANDRV_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;_USRDLL;VULKANDRV_EXPORTS;PLATFORM_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PrecompiledHeader>
       </PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
@@ -923,20 +925,32 @@
     <ClInclude Include="..\Games\Rune_100\Engine\Inc\UnURL.h" />
     <ClInclude Include="..\Games\Rune_100\Core\Inc\UnVcWin32.h" />
     <ClInclude Include="..\Games\Rune_100\Core\Inc\UnVcWn32SSE.h" />
+    <ClInclude Include="glad\vulkan.h" />
     <ClInclude Include="resource.h" />
+    <ClInclude Include="rhi.h" />
+    <ClInclude Include="utils\logging.h" />
+    <ClInclude Include="utils\macros.h" />
+    <ClInclude Include="utils\vec.h" />
     <ClInclude Include="vulkandrv.h" />
+    <ClInclude Include="vulkan_common.h" />
+    <ClInclude Include="vulkan_rhi.h" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="res.rc" />
+    <ResourceCompile Include="res.rc">
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">D:\prog\unreal-vulkan\unrealengine1-vulkandrv\games\UnrealTournament\Core\Inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="VulkanDrv.int" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\vulkandrv\vulkan_device.cpp">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">false</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="utils\logging.cpp" />
+    <ClCompile Include="utils\vec.cpp" />
     <ClCompile Include="vulkandrv.cpp" />
+    <ClCompile Include="vulkan_rhi.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -1,7 +1,6 @@
 #pragma once
 #include "Engine.h"
 #include "UnRender.h"
-//#include "vulkan_device.h"
 
 #define SAFE_RELEASE(p)      { if(p) { (p)->Release(); (p)=NULL; } }
 #define CLAMP(p,min,max)	{ if(p < min) p = min; else if (p>max) p = max; }
@@ -46,7 +45,6 @@ public:
 
 	/**@name Helpers */
 	//@{	
-	static void debugs(char *s);
 	int getOption(TCHAR* name,int defaultVal, bool isBool);
 	//@}
 	
