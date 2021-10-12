@@ -80,8 +80,6 @@ class RHIImageVk: public IRHIImage {
 	//rhi_vulkan::Image image_;
 	// should those be native Vk* members only?
 	//RHIFormat format_;
-	uint32_t width_;
-	uint32_t height_;
 
 	VkFormat vk_format_;
 	VkImage handle_;// = VK_NULL_HANDLE;
@@ -304,8 +302,8 @@ public:
 
 	// interface implementation
 	virtual ~RHIDeviceVk() {};
+	virtual IRHICmdBuf* CreateCommandBuffer(RHIQueueType::Value queue_type) ;
 #if 0
-	virtual IRHICmdBuf* CreateCommandBuffer(RHIQueueType queue_type) ;
 	virtual IRHIRenderPass* CreateRenderPass(const RHIRenderPassDesc* desc) ;
 	virtual IRHIFrameBuffer* CreateFrameBuffer(RHIFrameBufferDesc* desc, const IRHIRenderPass* rp_in) ;
 	virtual IRHIImageView* CreateImageView(const RHIImageViewDesc* desc) ;
@@ -344,5 +342,7 @@ public:
 	VkDevice Handle() const { return dev_.device_; }
 	VkPhysicalDevice PhysDeviceHandle() const { return dev_.phys_device_; }
 	VkAllocationCallbacks* Allocator() const { return dev_.pallocator_; }
+
+	virtual bool OnWindowSizeChanged(uint32_t width, uint32_t height, bool fullscreen) override;
 };
 

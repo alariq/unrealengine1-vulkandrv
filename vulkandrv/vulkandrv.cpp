@@ -15,7 +15,7 @@
 #include "utils/logging.h"
 //#include "texconverter.h"
 //#include "customflags.h"
-//#include "misc.h"
+#include "misc.h"
 //#include "vertexformats.h"
 //#include "shader_gouraudpolygon.h"
 //#include "shader_tile.h"
@@ -44,7 +44,11 @@ static LARGE_INTEGER perfCounterFreq;
 //static Shader_ComplexSurface *shader_ComplexSurface;
 //static Shader_FogSurface *shader_FogSurface;
 
+static int g_curCBIdx = 0;
+static int g_curFBIdx = 0;
 static IRHIDevice* g_vulkan_device = 0;
+static IRHICmdBuf* g_cmdbuf[kNumBufferedFrames] = { 0 };
+
 
 /**
 Attempts to read a property from the game's config file; on failure, a default is written (so it can be changed by the user) and returned.
@@ -79,7 +83,7 @@ int UVulkanRenderDevice::getOption(TCHAR* name,int defaultVal, bool isBool)
 
 UVulkanRenderDevice::UVulkanRenderDevice()
 {
-	log_info("constructing vulkan render device...");
+	log_info("constructing vulkan render device...\n");
 }
 
 /**
@@ -147,7 +151,7 @@ Initialization of renderer.
 */
 UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT NewColorBytes, UBOOL Fullscreen)
 {
-	log_info("Initializing Vulkan render device.");
+	log_info("Initializing Vulkan render device.\n");
 
 	//Set parent class params
 	URenderDevice::SpanBased = 0;
@@ -185,11 +189,11 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 #if USE_GLAD_LOADER
 	int glad_vk_version = gladLoaderLoadVulkan(NULL, NULL, NULL);
     if (!glad_vk_version) {
-        log_error("gladLoad Failure: Unable to load Vulkan symbols!");
+        log_error("gladLoad Failure: Unable to load Vulkan symbols!\n");
     }
 	else
 	{
-		log_info("Init: glad vulkan load succeded, version: %d", glad_vk_version);
+		log_info("Init: glad vulkan load succeded, version: %d\n", glad_vk_version);
 	}
 #endif
 
@@ -203,15 +207,19 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	g_vulkan_device = create_device();
 	assert(g_vulkan_device);
 
-	return 1;
-	
-#if 0	
-	if(!UD3D10RenderDevice::SetRes(NewX,NewY,NewColorBytes,Fullscreen))
+	IRHIDevice* device = g_vulkan_device;
+	for (size_t i = 0; i < kNumBufferedFrames; ++i) {
+		g_cmdbuf[i] = device->CreateCommandBuffer(RHIQueueType::kGraphics);
+	}
+	g_curCBIdx = 0;
+
+	if(!UVulkanRenderDevice::SetRes(NewX,NewY,NewColorBytes,Fullscreen))
 	{
 		GError->Log(L"Init: SetRes failed.");
 		return 0;
 	}
 
+#if 0	
 	textureCache= new (std::nothrow) TextureCache(D3D::getDevice());
 	if(!textureCache)
 	{
@@ -236,17 +244,44 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	GConfig->GetFloat(L"WinDrv.WindowsClient",L"Brightness",brightness);
 	D3D::setBrightness(brightness);
 
+#endif
 	URenderDevice::PrecacheOnFlip = 1; //Turned on to immediately recache on init (prevents lack of textures after fullscreen switch)
 
 	QueryPerformanceFrequency(&perfCounterFreq); //Init performance counter frequency.
 	
 	return 1;
-#endif
 }
 
 UBOOL UVulkanRenderDevice::SetRes(INT NewX, INT NewY, INT NewColorBytes, UBOOL Fullscreen)
 {
-	return 0;
+	log_info("SetRes: %d x %d\n", NewX, NewY, Fullscreen);
+
+	//Without BLIT_Direct3D major flickering occurs when switching from fullscreen to windowed.
+	UBOOL Result = URenderDevice::Viewport->ResizeViewport(Fullscreen ? (BLIT_Fullscreen|BLIT_Direct3D) : (BLIT_HardwarePaint|BLIT_Direct3D), NewX, NewY, NewColorBytes);
+	if (!Result) 
+	{
+		GError->Log(L"SetRes: Error resizing viewport.");
+		return 0;
+	}	
+
+	if(!g_vulkan_device->OnWindowSizeChanged(NewX, NewY, Fullscreen!=0))
+	//if(!D3D::resize(NewX,NewY,(Fullscreen!=0)))
+	{
+		GError->Log(L"SetRes: D3D::Resize failed.");
+		return 0;
+	}
+	
+	//Calculate new FOV. Is set, if needed, at frame start as game resets FOV on level load.
+	int defaultFOV;
+	#if(RUNE||DEUSEX)
+		defaultFOV=75;
+	#endif
+	#if(UNREALGOLD||UNREALTOURNAMENT||NERF)
+		defaultFOV=90;
+	#endif
+	customFOV = Misc::getFov(defaultFOV,Viewport->SizeX,Viewport->SizeY);
+
+	return 1;
 }
 
 void UVulkanRenderDevice::Exit()
@@ -263,6 +298,10 @@ void UVulkanRenderDevice::Flush()
 #else
 void UVulkanRenderDevice::Flush(UBOOL AllowPrecache)
 {
+	#if (!UNREALGOLD)
+	if(AllowPrecache && options.precache)
+		URenderDevice::PrecacheOnFlip = 1;
+	#endif
 }
 #endif
 
@@ -280,8 +319,12 @@ Depending on the values of the related parameters (see source code) this should 
 EndFlash() ends this, but other renderers actually save the parameters and start drawing it there so it gets blended with the final scene.
 \note RenderLockFlags aren't always properly set, this results in for example glitching in the Unreal castle flyover, in the wall of the tower with the Nali on it.
 */
+
+int sanity_lock_cnt = 0;
 void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane ScreenClear, DWORD RenderLockFlags, BYTE* HitData, INT* HitSize)
 {
+	assert(0 == sanity_lock_cnt);
+
 	float deltaTime;
 	static LARGE_INTEGER oldTime;
 	LARGE_INTEGER time;
@@ -312,24 +355,57 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 		Viewport->Actor->DefaultFOV=customFOV; //Do this so the value is set even if FOV settings don't take effect (multiplayer mode) 
 		URenderDevice::Viewport->Exec(buf,*GLog); //And this so the FOV change actually happens				
 	}
-
-	if (!g_vulkan_device->BeginFrame())
+	
+	IRHIDevice* dev = g_vulkan_device;
+	if (!dev->BeginFrame())
 	{
-		log_error("BeginFrame failed");
+		log_error("BeginFrame failed\n");
 	}
 
+	IRHIImage* fb_image = dev->GetCurrentSwapChainImage();
+	IRHICmdBuf* cb = g_cmdbuf[g_curCBIdx];
+
+	cb->Begin();
+
+	static float sec = 0.0f;
+	sec += deltaTime;
+	static vec4 color = vec4(1, 0, 0, 0);
+	color.x = 0.5f*sin(2 * 3.1415f*sec) + 0.5f;
+
+	cb->Barrier_PresentToClear(fb_image);
+	cb->Clear(fb_image, color, (uint32_t)RHIImageAspectFlags::kColor);
+	cb->Barrier_ClearToPresent(fb_image);
+
+	// draw nice images
+
+
+	cb->End();
+	dev->Submit(cb, RHIQueueType::kGraphics);
+
+	sanity_lock_cnt++;
 }
+
 void UVulkanRenderDevice::Unlock(UBOOL Blit)
 {
+	IRHIDevice* dev = g_vulkan_device;
+	assert(1 == sanity_lock_cnt);
+
+	IRHICmdBuf* cb = g_cmdbuf[g_curCBIdx];
+
+
 	if (!g_vulkan_device->Present())
 	{
-		log_error("Present failed");
+		log_error("Present failed\n");
 	}
 
 	if (!g_vulkan_device->EndFrame())
 	{
-		log_error("EndFrame failed");
+		log_error("EndFrame failed\n");
 	}
+
+	g_curCBIdx = (g_curCBIdx  + 1) % ((int)dev->GetNumBufferedFrames());
+
+	sanity_lock_cnt--;
 }
 void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Surface, FSurfaceFacet& Facet)
 {
@@ -366,6 +442,34 @@ void UVulkanRenderDevice::ReadPixels(FColor* Pixels)
 
 UBOOL UVulkanRenderDevice::Exec(const TCHAR* Cmd, FOutputDevice& Ar)
 {
+		//First try parent
+	//wchar_t* ptr;
+	#if (!UNREALGOLD && !NERF)
+	if(URenderDevice::Exec(Cmd,Ar))
+	{
+		return 1;
+	}
+	else
+	#endif
+	if(ParseCommand(&Cmd,L"GetRes"))
+	{
+		log_info("Getting modelist...\n");
+		TCHAR* resolutions = TEXT("ASFAS");// D3D::getModes();
+		Ar.Log(resolutions);
+		//delete [] resolutions;
+		log_info("Done.\n");
+		return 1;
+	}	
+	/*else if((ptr=(wchar_t*)wcswcs(Cmd,L"Brightness"))) //Brightness is sent as "brightness [val]".
+	{
+		UD3D10RenderDevice::debugs("Setting brightness.");
+		if((ptr=wcschr(ptr,' ')))//Search for space after 'brightness'
+		{
+			float b;
+			b=_wtof(ptr); //Get brightness value;
+			D3D::setBrightness(b);
+		}
+	}*/
 	return 0;
 }
 

@@ -1,3 +1,4 @@
+#include "vulkan_common.h"
 #include "rhi.h"
 
 IRHIGraphicsPipeline::~IRHIGraphicsPipeline() {}

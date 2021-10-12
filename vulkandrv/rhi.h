@@ -654,9 +654,9 @@ class IRHIEvent {
 
 class IRHIDevice {
 public:
-#if 0
 
-	virtual IRHICmdBuf*			CreateCommandBuffer(RHIQueueType queue_type) = 0;
+	virtual IRHICmdBuf*			CreateCommandBuffer(RHIQueueType::Value queue_type) = 0;
+#if 0
 	virtual IRHIRenderPass*		CreateRenderPass(const RHIRenderPassDesc* desc) = 0;
 	virtual IRHIFrameBuffer*	CreateFrameBuffer(RHIFrameBufferDesc* desc, const IRHIRenderPass* rp_in) = 0;
 	virtual IRHIImageView*		CreateImageView(const RHIImageViewDesc* desc) = 0;
@@ -691,6 +691,8 @@ public:
 	virtual bool Present() = 0;
 	virtual bool EndFrame() = 0;
 	virtual ~IRHIDevice() {};
+
+	virtual bool OnWindowSizeChanged(uint32_t width, uint32_t height, bool fullscreen) = 0;
 };
 #if 0
 struct RenderContext {

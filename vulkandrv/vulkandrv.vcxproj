@@ -926,6 +926,7 @@
     <ClInclude Include="..\Games\Rune_100\Core\Inc\UnVcWin32.h" />
     <ClInclude Include="..\Games\Rune_100\Core\Inc\UnVcWn32SSE.h" />
     <ClInclude Include="glad\vulkan.h" />
+    <ClInclude Include="misc.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="rhi.h" />
     <ClInclude Include="utils\logging.h" />
@@ -947,6 +948,8 @@
     <ClCompile Include="..\vulkandrv\vulkan_device.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">false</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="misc.cpp" />
+    <ClCompile Include="rhi.cpp" />
     <ClCompile Include="utils\logging.cpp" />
     <ClCompile Include="utils\vec.cpp" />
     <ClCompile Include="vulkandrv.cpp" />

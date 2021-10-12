@@ -1174,12 +1174,11 @@ void RHICmdBufVk::Barrier_DrawToPresent(IRHIImage *image_in) {
 			VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 }
 
-#if 0
 
 ////////////////RHI Device /////////////////////////////////////////////////////
 
 // should this be mobved to command buffer class / .cpp file and just pass Device as a parameter ?
-IRHICmdBuf* RHIDeviceVk::CreateCommandBuffer(RHIQueueType queue_type) {
+IRHICmdBuf* RHIDeviceVk::CreateCommandBuffer(RHIQueueType::Value queue_type) {
 
 	assert(queue_type == RHIQueueType::kGraphics || queue_type == RHIQueueType::kPresentation);
 	uint32_t qfi = (RHIQueueType::kGraphics == queue_type) ? dev_.queue_families_.graphics_
@@ -1233,6 +1232,7 @@ IRHICmdBuf* RHIDeviceVk::CreateCommandBuffer(RHIQueueType queue_type) {
 
 }
 
+#if 0
 ////////////////////////////////////////////////////////////////////////////////
 IRHIRenderPass* RHIDeviceVk::CreateRenderPass(const RHIRenderPassDesc* desc) {
 	assert(desc);
@@ -1432,7 +1432,9 @@ bool RHIDeviceVk::BeginFrame() {
 			break;
 		case VK_ERROR_OUT_OF_DATE_KHR:
 			log_warning("VK_ERROR_OUT_OF_DATE_KHR, probably need to resize window!\n");
-			return false;
+			if (!OnWindowSizeChanged(0,0, false)) {
+				return false;
+			}
 		default:
 			log_error("Problem occurred during swap chain image acquisition!\n");
 			return false;
@@ -1485,9 +1487,17 @@ bool RHIDeviceVk::Present() {
 	case VK_SUCCESS:
 		break;
 	case VK_ERROR_OUT_OF_DATE_KHR:
+		log_warning("vkQueuePresentKHR: VK_ERROR_OUT_OF_DATE_KHR\n");
+		if (!OnWindowSizeChanged(0,0, false)) {
+			return false;
+		}
+		break;
 	case VK_SUBOPTIMAL_KHR:
-		log_error("vkQueuePresentKHR: VK_SUBOPTIMAL_KHR\n");
-		return false; 
+		log_warning("vkQueuePresentKHR: VK_SUBOPTIMAL_KHR\n");
+		if (!OnWindowSizeChanged(0,0, false)) {
+			return false;
+		}
+		break;
 	default:
 		log_error("vkQueuePresentKHR: Problem occurred during image presentation!\n");
 		return false;
@@ -1517,5 +1527,51 @@ IRHIImageView* RHIDeviceVk::GetSwapChainImageView(uint32_t index) {
 IRHIImage* RHIDeviceVk::GetSwapChainImage(uint32_t index) {
 	assert(index < GetSwapChainSize());
 	return dev_.swap_chain_.images_[index];
+}
+
+bool RHIDeviceVk::OnWindowSizeChanged(uint32_t width, uint32_t height, bool fullscreen) {
+
+	uint32_t old_w = dev_.swap_chain_data_.capabilities_.currentExtent.width;
+	uint32_t old_h = dev_.swap_chain_data_.capabilities_.currentExtent.height;
+
+	log_info("OnWindowSizeChanged(res: %dx%d, fullscreen: %d)\n", width, height, fullscreen);
+
+	SwapChainData new_swapchain_data;
+	if (!query_swapchain_data(dev_.phys_device_, dev_.surface_, new_swapchain_data))
+	{
+		log_error("failed to query_swapchain_data\n");
+		return false;
+	}
+
+	if (new_swapchain_data.capabilities_.currentExtent.height == 0 ||
+		new_swapchain_data.capabilities_.currentExtent.width == 0)
+	{
+		if (width != 0 && height != 0) {
+			log_info("Could not get swapchain res, using provided res: %d %d\n", width, height);
+		} else {
+			log_info("Could not get swapchain res, and provided res is 0, so using old res: %d %d\n", width, height);
+		}
+
+		new_swapchain_data.capabilities_.currentExtent = { width, height };
+		new_swapchain_data.capabilities_.minImageExtent = { width, height };
+		new_swapchain_data.capabilities_.maxImageExtent = { width, height };
+	}
+
+	log_info("Creating new swapchain: %d %d\n",
+			 new_swapchain_data.capabilities_.currentExtent.width,
+			 new_swapchain_data.capabilities_.currentExtent.height);
+	SwapChain new_swapchain;
+	if (!create_swap_chain(new_swapchain_data, dev_.device_, dev_.surface_,
+		dev_.queue_families_, dev_.pallocator_, new_swapchain, dev_.swap_chain_.swap_chain_)) {
+		return false;
+	}
+
+	// destroy old swap chain
+	destroy_swapchain(dev_);
+
+	dev_.swap_chain_data_ = new_swapchain_data;
+	dev_.swap_chain_ = new_swapchain;
+
+	return true;
 }
 

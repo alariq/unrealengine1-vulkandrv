@@ -17,6 +17,10 @@
 
 void debugs(logging::eLogCategory lc, char* s)
 {
+#if defined(PLATFORM_WINDOWS) && defined(_DEBUG)
+	OutputDebugStringA(s);
+#endif
+
 	WCHAR buf[255];
 	size_t n;
 	mbstowcs_s(&n,buf,255,s,254);
@@ -63,12 +67,12 @@ void logmsg(eLogCategory lc, const char* file, int line, const char* fmt, ...)
 	size_t hdr_len = strlen(text);
 
 	va_start(ap, fmt);	
-	vsnprintf(text+strlen(text), MAX_LOG_LINE - hdr_len-1, fmt, ap); // 10 for "decorations"
+	vsnprintf(text+strlen(text), MAX_LOG_LINE - hdr_len-2, fmt, ap); // 1 for "\0"
 
 	va_end(ap);
 
 	size_t len = strlen(text);
-	text[len] = '\0';
+	text[len] = '\n';
 
 	debugs(lc, text);
 }

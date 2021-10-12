@@ -28,6 +28,9 @@ struct v {
     PFN_vkGetPhysicalDeviceSurfaceFormatsKHR fpGetPhysicalDeviceSurfaceFormatsKHR;
     PFN_vkGetPhysicalDeviceSurfacePresentModesKHR fpGetPhysicalDeviceSurfacePresentModesKHR;
 
+	// KHR_win32_surface
+	PFN_vkCreateWin32SurfaceKHR fpCreateWin32SurfaceKHR;
+
 	// KHR_swapchain
     PFN_vkCreateSwapchainKHR fpCreateSwapchainKHR;
     PFN_vkDestroySwapchainKHR fpDestroySwapchainKHR;
@@ -43,7 +46,7 @@ struct v V;
 
 #define GET_INSTANCE_PROC_ADDR(inst, entrypoint)                                                              \
     {                                                                                                         \
-        V.fp##entrypoint = (PFN_vk##entrypoint)vkGetInstanceProcAddr(inst, "vk" #entrypoint);             \
+        V.fp##entrypoint = (PFN_vk##entrypoint)vkGetInstanceProcAddr((inst), "vk" #entrypoint);             \
         if (V.fp##entrypoint == NULL) {                                                                   \
             log_error("vkGetInstanceProcAddr failed to find vk" #entrypoint, "vkGetInstanceProcAddr Failure"); \
         }                                                                                                     \
@@ -53,7 +56,7 @@ static PFN_vkGetDeviceProcAddr g_gdpa = NULL;
 
 #define GET_DEVICE_PROC_ADDR(inst, dev, entrypoint)                                                                    \
     {                                                                                                            \
-        if (!g_gdpa) g_gdpa = (PFN_vkGetDeviceProcAddr)vkGetInstanceProcAddr(inst, "vkGetDeviceProcAddr"); \
+        if (!g_gdpa) g_gdpa = (PFN_vkGetDeviceProcAddr)vkGetInstanceProcAddr((inst), "vkGetDeviceProcAddr"); \
         V.fp##entrypoint = (PFN_vk##entrypoint)g_gdpa(dev, "vk" #entrypoint);                                \
         if (V.fp##entrypoint == NULL) {                                                                      \
             log_error("vkGetDeviceProcAddr failed to find vk" #entrypoint, "vkGetDeviceProcAddr Failure");        \
@@ -112,8 +115,10 @@ bool get_required_extensions(HWND rw_handle, std::vector<const char*>& ext) {
 		return false;
 #endif
 	ext.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
-#if PLATFORM_WINDOWS
+#if defined(VK_USE_PLATFORM_WIN32_KHR)
 	ext.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+#else
+#error unsupported platform
 #endif
 	
 
@@ -253,6 +258,10 @@ bool create_instance(HWND rw_handle, VkAllocationCallbacks* pallocator,
 		log_warning("Failed to set up debug messenger!\n");
 	}
 
+#if defined(VK_USE_PLATFORM_WIN32_KHR)
+    GET_INSTANCE_PROC_ADDR(*instance, CreateWin32SurfaceKHR);
+#endif
+
 	return true;
 }
 
@@ -262,7 +271,7 @@ bool create_surface(HWND rw_handle, VkInstance instance, VkSurfaceKHR& surface) 
 	createInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
 	createInfo.hwnd = rw_handle;
 	createInfo.hinstance = GetModuleHandle(nullptr);
-	if (vkCreateWin32SurfaceKHR(instance, &createInfo, nullptr, &surface) != VK_SUCCESS) {
+	if (V.fpCreateWin32SurfaceKHR(instance, &createInfo, nullptr, &surface) != VK_SUCCESS) {
 		log_error("vkCreateWin32SurfaceKHR: failed to create window surface!");
 		return false;
 	}
@@ -453,11 +462,11 @@ bool create_semaphore(VkDevice device, VkAllocationCallbacks* pallocator, VkSema
 	return true;
 }
 
-bool create_swap_chain(SwapChainData swap_chain_data, VkDevice device, VkSurfaceKHR surface,
-	QueueFamilies qfi, VkAllocationCallbacks* pallocator, SwapChain& swap_chain) {
+bool create_swap_chain(const SwapChainData& swap_chain_data, VkDevice device, VkSurfaceKHR surface,
+	const QueueFamilies& qfi, VkAllocationCallbacks* pallocator, SwapChain& swap_chain, VkSwapchainKHR old_swapchain) {
 
 	// select format 
-	VkSurfaceFormatKHR format;// = { VK_FORMAT_UNDEFINED, 0 };// VK_COLOR_SPACE_MAX_ENUM_KHR
+	VkSurfaceFormatKHR format = { VK_FORMAT_UNDEFINED, VK_COLOR_SPACE_MAX_ENUM_KHR };
 
 	for (int i = 0; i < (int)swap_chain_data.formats_.size(); ++i) {
 		const VkSurfaceFormatKHR& fmt = swap_chain_data.formats_[i];
@@ -534,7 +543,7 @@ bool create_swap_chain(SwapChainData swap_chain_data, VkDevice device, VkSurface
 	create_info.presentMode = present_mode;
 	// do not care about pixels obscured by another window as we are not going to read from a window
 	create_info.clipped = VK_TRUE;
-	create_info.oldSwapchain = VK_NULL_HANDLE;
+	create_info.oldSwapchain = old_swapchain;
 
 	if (V.fpCreateSwapchainKHR(device, &create_info, pallocator, &swap_chain.swap_chain_) != VK_SUCCESS) {
 		log_error("vkCreateSwapchainKHR: failed to create swap chain!");
@@ -672,7 +681,7 @@ bool vulkan_initialize(HWND rw_handle) {
 	//
 
 	if (!create_swap_chain(vk_dev.swap_chain_data_, vk_dev.device_, vk_dev.surface_,
-		vk_dev.queue_families_, vk_dev.pallocator_, vk_dev.swap_chain_)) {
+		vk_dev.queue_families_, vk_dev.pallocator_, vk_dev.swap_chain_, 0)) {
 		return false;
 	}
 
@@ -688,21 +697,34 @@ uint32_t get_window_flags(void) {
 
 void make_current_context() {}
 
-bool vulkan_finalize() {
-	{
-		// please forbid me... will change later
-		// make IRHIDevice::Destroy() ao that is object is passed we already know real device type
-		// => no conversions + no need for virtual Destroy() in every resource class
-		// can be just Destroy(VkDevice dev, VkAllocatorPointers pallocator)
-		// who knows... but maybe just make IRHIInastance and have IRHIDevice there
-		RHIDeviceVk tmp(vk_dev);
-		for (int i = 0; i < (int)vk_dev.swap_chain_.views_.size();++i) {
-			RHIImageViewVk* view = vk_dev.swap_chain_.views_[i];
-			view->Destroy(&tmp);
-		}
+void destroy_swapchain(VulkanDevice& dev) {
+
+	// please forbid me... will change later
+	// make IRHIDevice::Destroy() ao that is object is passed we already know real device type
+	// => no conversions + no need for virtual Destroy() in every resource class
+	// can be just Destroy(VkDevice dev, VkAllocatorPointers pallocator)
+	// who knows... but maybe just make IRHIInastance and have IRHIDevice there
+	RHIDeviceVk tmp(dev);
+	for (int i = 0; i < (int)dev.swap_chain_.views_.size(); ++i) {
+		RHIImageViewVk *view = dev.swap_chain_.views_[i];
+		view->Destroy(&tmp);
 	}
 
-	V.fpDestroySwapchainKHR(vk_dev.device_, vk_dev.swap_chain_.swap_chain_, vk_dev.pallocator_);
+	V.fpDestroySwapchainKHR(dev.device_, dev.swap_chain_.swap_chain_, dev.pallocator_);
+
+	// images are destroyed by DestroySwapchainKHR
+	dev.swap_chain_.images_.clear();
+
+	dev.swap_chain_.views_.clear();
+	dev.swap_chain_.swap_chain_ = VK_NULL_HANDLE;
+	dev.swap_chain_data_ = { 0 };
+}
+
+bool vulkan_finalize() {
+
+	vkDeviceWaitIdle(vk_dev.device_);
+
+	destroy_swapchain(vk_dev);
 
 	// TODO: this belongs to the renderer
 	for (uint32_t i = 0; i < kNumBufferedFrames; ++i) {
