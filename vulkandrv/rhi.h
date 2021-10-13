@@ -12,6 +12,8 @@ class IRHIRenderPass;
 class IRHIFrameBuffer;
 class IRHIEvent;
 
+typedef void(*fpOnSwapChainRecreated)(void* user_ptr);
+
 //#if defined(USE_QueueType_TRANSLATION)
 struct RHIQueueType { enum Value: uint32_t {
 	kUnknown = 0x0,
@@ -22,8 +24,9 @@ struct RHIQueueType { enum Value: uint32_t {
 };
 //#endif
 
+#define USE_Format_TRANSLATION
 #if defined(USE_Format_TRANSLATION)
-struct RHIFormat { enum: uint32_t {
+enum class RHIFormat : uint32_t {
     kUNDEFINED = 0,
 	kR8G8B8A8_UNORM ,
 	kR8G8B8A8_UINT,
@@ -50,15 +53,13 @@ struct RHIFormat { enum: uint32_t {
     kB8G8R8A8_SRGB,
 
 };
-};
 #else
 #define RHIFormat VkFormat
 #endif
 
-//#define USE_PipelineStageFlags_TRANSLATION
-
+#define USE_PipelineStageFlags_TRANSLATION
 #if defined(USE_PipelineStageFlags_TRANSLATION)
-struct RHIPipelineStageFlags { enum: uint32_t {
+struct RHIPipelineStageFlags { enum Value: uint32_t {
 	kTopOfPipe = 0x00000001,
 	kDrawIndirect = 0x00000002,
 	kVertexInput = 0x00000004,
@@ -83,10 +84,9 @@ struct RHIPipelineStageFlags { enum: uint32_t {
 #endif
 
 
-//#define USE_ACCESS_FLAGS_TRANSLATION
-
+#define USE_ACCESS_FLAGS_TRANSLATION
 #if defined(USE_ACCESS_FLAGS_TRANSLATION)
-struct RHIAccessFlags { enum : uint32_t {
+struct RHIAccessFlags { enum Value: uint32_t {
 	kIndirectCommandRead = 0x00000001,
 	kIndexRead = 0x00000002,
 	kVertexAttributeRead = 0x00000004,
@@ -110,12 +110,18 @@ struct RHIAccessFlags { enum : uint32_t {
 #define RHIAccessFlags VkAccessFlags
 #endif
 
-struct RHIDependencyFlags { enum : uint32_t {
+
+#define USE_DependencyFlags_TRANSLATION
+#if defined(USE_DependencyFlags_TRANSLATION)
+struct RHIDependencyFlags { enum Value : uint32_t {
     kByRegion = 0x00000001,
     kDeviceGroup = 0x00000004,
     kViewLocal = 0x00000002,
 };
 };
+#else
+#define RHIDependencyFlags VkDependencyFlags;
+#endif
 
 #if defined(USE_ImageAspectFlags_TRANSLATION)
 struct RHIImageAspectFlags { enum: uint32_t {
@@ -132,9 +138,9 @@ struct RHIImageAspectFlags { enum: uint32_t {
 };
 };
 #endif
-
+#define USE_ImageLayout_TRANSLATION
 #if defined(USE_ImageLayout_TRANSLATION)
-struct RHIImageLayout { enum : uint32_t {
+struct RHIImageLayout { enum Value: uint32_t {
 	kUndefined = 0,
 	kGeneral = 1,
 	kColorOptimal = 2,
@@ -161,8 +167,9 @@ struct RHIAttachmentLoadOp { enum Value: uint32_t {
 		kDoNotCare = 2,
 	};
 };
+#define USE_PipelineBindPoint_TRANSLATION
 #if defined(USE_PipelineBindPoint_TRANSLATION) 
-struct RHIPipelineBindPoint { enum : uint32_t {
+struct RHIPipelineBindPoint { enum Value: uint32_t {
 		kGraphics = 0,
 		kCompute = 1,
 		kRayTracing = 2,
@@ -172,6 +179,8 @@ struct RHIPipelineBindPoint { enum : uint32_t {
 #define RHIPipelineBindPoint VkPipelineBindPoint 
 #endif
 
+#define USE_ImageViewType_TRANSLATION
+#if defined(USE_ImageViewType_TRANSLATION) 
 struct RHIImageViewType { enum Value: uint32_t {
     k1d = 0,
     k2d = 1,
@@ -182,8 +191,11 @@ struct RHIImageViewType { enum Value: uint32_t {
     kCubeArray = 6,
 };
 };
+#else
+#define RHIImageViewType VkImageViewType;
+#endif
 
-struct RHIPrimitiveTopology { enum: uint32_t {
+struct RHIPrimitiveTopology { enum Value: uint32_t {
     kPointList = 0,
     kLineList = 1,
     kLineStrip = 2,
@@ -198,14 +210,14 @@ struct RHIPrimitiveTopology { enum: uint32_t {
 };
 };
 
-struct RHIPolygonMode { enum: uint32_t {
+struct RHIPolygonMode { enum Value: uint32_t {
     kFill = 0,
     kLine = 1,
     kPoint = 2,
 };
 };
 
-struct RHICullModeFlags { enum: uint32_t {
+struct RHICullModeFlags { enum Value: uint32_t {
     kNone = 0,
     kFront = 0x00000001,
     kBack = 0x00000002,
@@ -213,7 +225,7 @@ struct RHICullModeFlags { enum: uint32_t {
 };
 };
 
-struct RHIFrontFace { enum: uint32_t {
+struct RHIFrontFace { enum Value: uint32_t {
     kCounterClockwise = 0,
     kClockwise = 1
 };
@@ -243,7 +255,7 @@ struct RHIStencilOp { enum: uint32_t {
 };
 };
 
-struct RHILogicOp { enum: uint32_t {
+struct RHILogicOp { enum Value: uint32_t {
     kClear = 0,
     kAnd = 1,
     kAndReverse = 2,
@@ -263,7 +275,7 @@ struct RHILogicOp { enum: uint32_t {
 };
 };
 
-struct RHIBlendFactor { enum: uint32_t {
+struct RHIBlendFactor { enum Value: uint32_t {
     Zero = 0,
     One = 1,
     SrcColor = 2,
@@ -277,7 +289,7 @@ struct RHIBlendFactor { enum: uint32_t {
 };
 };
 
-struct RHIBlendOp { enum: uint32_t {
+struct RHIBlendOp { enum Value: uint32_t {
     kAdd = 0,
     kSubtract = 1,
     kReverseSubtract = 2,
@@ -319,7 +331,7 @@ struct RHIMemoryPropertyFlags { enum: uint32_t {
 };
 };
 
-struct RHISharingMode { enum: uint32_t {
+struct RHISharingMode { enum Value: uint32_t {
     kExclusive = 0,
     kConcurrent = 1
 };
@@ -341,8 +353,8 @@ struct RHIImageSubresourceRange {
 ////////////////////////////////////////////////////////////////////////////////
 struct RHIImageViewDesc {
 	IRHIImage*                    image;
-    RHIImageViewType            viewType;
-    RHIFormat                   format;
+    RHIImageViewType::Value            viewType;
+    RHIFormat                       format;
     //RHIComponentMapping         components;
     RHIImageSubresourceRange    subresourceRange;
 };
@@ -360,7 +372,7 @@ struct RHIFrameBufferDesc {
 };
 
 ////////////////////////////////////////////////////////////////////////////////
-struct RHIShaderStageFlags { enum: uint32_t {
+struct RHIShaderStageFlags { enum Value: uint32_t {
 	kVertex = 0x00000001,
 	kTessellationControl = 0x00000002,
 	kTessellationEvaluation = 0x00000004,
@@ -373,22 +385,22 @@ struct RHIShaderStageFlags { enum: uint32_t {
 ////////////////////////////////////////////////////////////////////////////////
 struct RHIAttachmentRef {
 	int index;
-	RHIImageLayout layout;
+	RHIImageLayout::Value layout;
 };
 struct RHIAttachmentDesc {
     RHIFormat                        format;
     uint32_t						numSamples;
-    RHIAttachmentLoadOp              loadOp;
-    RHIAttachmentStoreOp             storeOp;
-    RHIAttachmentLoadOp              stencilLoadOp;
-    RHIAttachmentStoreOp             stencilStoreOp;
-    RHIImageLayout                   initialLayout;
-    RHIImageLayout                   finalLayout;
+    RHIAttachmentLoadOp::Value              loadOp;
+    RHIAttachmentStoreOp::Value             storeOp;
+    RHIAttachmentLoadOp::Value              stencilLoadOp;
+    RHIAttachmentStoreOp::Value             stencilStoreOp;
+    RHIImageLayout::Value                   initialLayout;
+    RHIImageLayout::Value                   finalLayout;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
 struct RHISubpassDesc {
-	RHIPipelineBindPoint bindPoint;
+	RHIPipelineBindPoint::Value bindPoint;
 	int inputAttachmentCount;
 	RHIAttachmentRef* inputAttachments;
 	int colorAttachmentCount;
@@ -402,10 +414,10 @@ struct RHISubpassDesc {
 struct RHISubpassDependency {
     uint32_t         srcSubpass;
     uint32_t         dstSubpass;
-    RHIPipelineStageFlags srcStageMask;
-    RHIPipelineStageFlags dstStageMask;
-    RHIAccessFlags   srcAccessMask;
-    RHIAccessFlags  dstAccessMask;
+    RHIPipelineStageFlags::Value srcStageMask;
+    RHIPipelineStageFlags::Value dstStageMask;
+    RHIAccessFlags::Value   srcAccessMask;
+    RHIAccessFlags::Value  dstAccessMask;
     uint32_t        dependencyFlags; // RHIDependencyFlags 
 };
 
@@ -418,6 +430,7 @@ struct RHIRenderPassDesc {
 	RHISubpassDependency* dependencies;
 };
 ////////////////////////////////////////////////////////////////////////////////
+#define USE_VertexInputRate_TRANSLATION
 #if defined(USE_VertexInputRate_TRANSLATION)
 enum RHIVertexInputRate: uint32_t {
     kVertex = 0,
@@ -436,7 +449,7 @@ struct RHIVertexInputBindingDesc {
 struct RHIVertexInputAttributeDesc {
     uint32_t    location;
     uint32_t    binding;
-    RHIFormat    format;
+    RHIFormat   format;
     uint32_t    offset;
 };
 
@@ -458,7 +471,7 @@ struct RHIScissor {
 };
 
 struct RHIShaderStage {
-	RHIShaderStageFlags stage;
+	RHIShaderStageFlags::Value stage;
 	class IRHIShader *module;
 	const char *pEntryPointName;
 };
@@ -471,7 +484,7 @@ struct RHIVertexInputState {
 };
 
 struct RHIInputAssemblyState {
-    RHIPrimitiveTopology topology;
+    RHIPrimitiveTopology::Value topology;
     bool primitiveRestartEnable;
 };
 
@@ -485,9 +498,9 @@ struct RHIViewportState {
 struct RHIRasterizationState {
 	bool depthClampEnable;
 	bool rasterizerDiscardEnable;
-	RHIPolygonMode polygonMode;
-	RHICullModeFlags cullMode;
-	RHIFrontFace frontFace;
+	RHIPolygonMode::Value polygonMode;
+	RHICullModeFlags::Value cullMode;
+	RHIFrontFace::Value frontFace;
 	bool depthBiasEnable;
 	float depthBiasConstantFactor;
 	float depthBiasClamp;
@@ -506,18 +519,18 @@ struct RHIMultisampleState {
 
 struct RHIColorBlendAttachmentState {
     uint32_t				  blendEnable;
-    RHIBlendFactor            srcColorBlendFactor;
-    RHIBlendFactor            dstColorBlendFactor;
-    RHIBlendOp                colorBlendOp;
-    RHIBlendFactor            srcAlphaBlendFactor;
-    RHIBlendFactor            dstAlphaBlendFactor;
-    RHIBlendOp                alphaBlendOp;
+    RHIBlendFactor::Value       srcColorBlendFactor;
+    RHIBlendFactor::Value      dstColorBlendFactor;
+    RHIBlendOp::Value                colorBlendOp;
+    RHIBlendFactor::Value            srcAlphaBlendFactor;
+    RHIBlendFactor::Value            dstAlphaBlendFactor;
+    RHIBlendOp::Value                alphaBlendOp;
     uint32_t                  colorWriteMask; // RHIColorComponentFlags    
 };
 
 struct RHIColorBlendState {
 	bool logicOpEnable;
-	RHILogicOp logicOp;
+	RHILogicOp::Value logicOp;
 	uint32_t attachmentCount;
 	const RHIColorBlendAttachmentState *pAttachments;
 	float blendConstants[4];
@@ -564,7 +577,7 @@ public:
 	virtual bool Begin() = 0;
 	virtual bool BeginRenderPass(IRHIRenderPass *i_rp, IRHIFrameBuffer *i_fb, const ivec4 *render_area,
 					   const RHIClearValue *clear_values, uint32_t count) = 0;
-	virtual void BindPipeline(RHIPipelineBindPoint bind_point, IRHIGraphicsPipeline* pipeline) = 0;
+	virtual void BindPipeline(RHIPipelineBindPoint::Value bind_point, IRHIGraphicsPipeline* pipeline) = 0;
 	virtual void Draw(uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex,
 					  uint32_t first_instance) = 0;
 
@@ -573,17 +586,17 @@ public:
 	virtual void CopyBuffer(class IRHIBuffer *dst, uint32_t dst_offset, class IRHIBuffer *src,
 							uint32_t src_offset, uint32_t size) = 0;
 
-    virtual void SetEvent(IRHIEvent* event, RHIPipelineStageFlags stage) = 0;
-    virtual void ResetEvent(IRHIEvent* event, RHIPipelineStageFlags stage) = 0;
+    virtual void SetEvent(IRHIEvent* event, RHIPipelineStageFlags::Value stage) = 0;
+    virtual void ResetEvent(IRHIEvent* event, RHIPipelineStageFlags::Value stage) = 0;
     //TODO: implement
     //virtual void WaitForEvent(IRHIEvent* event, ...) = 0;
 
 	virtual bool End() = 0;
 	virtual void EndRenderPass(const IRHIRenderPass *i_rp, IRHIFrameBuffer *i_fb) = 0;
 
-	virtual void BufferBarrier(IRHIBuffer *i_buffer, RHIAccessFlags src_acc_flags,
-					   RHIPipelineStageFlags src_stage, RHIAccessFlags dst_acc_fags,
-					   RHIPipelineStageFlags dst_stage) = 0;
+	virtual void BufferBarrier(IRHIBuffer *i_buffer, RHIAccessFlags::Value src_acc_flags,
+					   RHIPipelineStageFlags::Value src_stage, RHIAccessFlags::Value dst_acc_fags,
+					   RHIPipelineStageFlags::Value dst_stage) = 0;
 
 	virtual void Barrier_ClearToPresent(IRHIImage* image) = 0;
 	virtual void Barrier_PresentToClear(IRHIImage* image) = 0;
@@ -600,6 +613,7 @@ public:
 
 class IRHIFrameBuffer {
 public:
+    virtual void Destroy(IRHIDevice* device) = 0;
 	virtual ~IRHIFrameBuffer() = 0;
 };
 
@@ -656,11 +670,10 @@ class IRHIDevice {
 public:
 
 	virtual IRHICmdBuf*			CreateCommandBuffer(RHIQueueType::Value queue_type) = 0;
-#if 0
 	virtual IRHIRenderPass*		CreateRenderPass(const RHIRenderPassDesc* desc) = 0;
 	virtual IRHIFrameBuffer*	CreateFrameBuffer(RHIFrameBufferDesc* desc, const IRHIRenderPass* rp_in) = 0;
 	virtual IRHIImageView*		CreateImageView(const RHIImageViewDesc* desc) = 0;
-	virtual IRHIBuffer*		    CreateBuffer(uint32_t size, uint32_t usage, uint32_t memprop, RHISharingMode sharing) = 0;
+	virtual IRHIBuffer*		    CreateBuffer(uint32_t size, uint32_t usage, uint32_t memprop, RHISharingMode::Value sharing) = 0;
 
     virtual IRHIFence*          CreateFence(bool create_signalled) = 0;
     virtual IRHIEvent*          CreateEvent() = 0;
@@ -674,11 +687,10 @@ public:
             const IRHIRenderPass *i_render_pass) = 0;
 
     virtual IRHIPipelineLayout* CreatePipelineLayout(IRHIDescriptorSetLayout* desc_set_layout) = 0;
-    virtual IRHIShader* CreateShader(RHIShaderStageFlags stage, const uint32_t *pdata, uint32_t size) = 0;
+    virtual IRHIShader* CreateShader(RHIShaderStageFlags::Value stage, const uint32_t *pdata, uint32_t size) = 0;
 
-#endif
 
-	virtual RHIFormat				GetSwapChainFormat() = 0;
+	virtual RHIFormat               GetSwapChainFormat() = 0;
 	virtual uint32_t				GetSwapChainSize() = 0;
 	virtual IRHIImageView*	        GetSwapChainImageView(uint32_t index) = 0;
 	virtual class IRHIImage*	    GetSwapChainImage(uint32_t index) = 0;
@@ -693,6 +705,7 @@ public:
 	virtual ~IRHIDevice() {};
 
 	virtual bool OnWindowSizeChanged(uint32_t width, uint32_t height, bool fullscreen) = 0;
+    virtual void SetOnSwapChainRecreatedCallback(fpOnSwapChainRecreated callback, void* user_ptr) = 0;
 };
 #if 0
 struct RenderContext {

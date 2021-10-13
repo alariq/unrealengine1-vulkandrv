@@ -77,7 +77,7 @@ RHIFormat untranslate(VkFormat fmt) {
         case VK_FORMAT_R32G32B32A32_SFLOAT:return RHIFormat::kR32G32B32A32_SFLOAT;
 		case VK_FORMAT_B8G8R8A8_UNORM:return RHIFormat::kB8G8R8A8_UNORM;	 
         case VK_FORMAT_B8G8R8A8_UINT:return RHIFormat::kB8G8R8A8_UINT;	  
-        case VK_FORMAT_B8G8R8A8_SRGB:return RHIFormat::kB8G8R8A8_SRGB;
+		case VK_FORMAT_B8G8R8A8_SRGB:return RHIFormat::kB8G8R8A8_SRGB;
         default:
 		    assert(0 && "Incorrect format");
     		return RHIFormat::kUNDEFINED;
@@ -99,6 +99,7 @@ RHIFormat untranslate_f(VkFormat fmt) {
 }
 #endif
 
+#if defined(USE_ImageViewType_TRANSLATION) 
 VkImageViewType translate(RHIImageViewType::Value type) {
 	static VkImageViewType types[] = {
 		VK_IMAGE_VIEW_TYPE_1D,
@@ -112,6 +113,12 @@ VkImageViewType translate(RHIImageViewType::Value type) {
 	assert((uint32_t)type < countof(types));
 	return types[(uint32_t)type];
 };
+VkImageViewType translate_ivt(RHIImageViewType::Value type) {
+	return translate(type);
+}
+#else
+
+#endif
 
 
 VkSampleCountFlagBits translate_num_samples(int num_samples) {
@@ -129,7 +136,7 @@ VkSampleCountFlagBits translate_num_samples(int num_samples) {
 	}
 }
 
-VkAttachmentLoadOp translate(RHIAttachmentLoadOp::Value load_op) {
+VkAttachmentLoadOp translate_alo(RHIAttachmentLoadOp::Value load_op) {
 	static VkAttachmentLoadOp ops[] = {
 		VK_ATTACHMENT_LOAD_OP_LOAD,
 		VK_ATTACHMENT_LOAD_OP_CLEAR,
@@ -138,8 +145,11 @@ VkAttachmentLoadOp translate(RHIAttachmentLoadOp::Value load_op) {
 	assert((uint32_t)load_op < countof(ops));
 	return ops[(uint32_t)load_op];
 }
+VkAttachmentLoadOp translate(RHIAttachmentLoadOp::Value load_op) {
+	return translate_alo(load_op);
+}
 
-VkAttachmentStoreOp translate(RHIAttachmentStoreOp::Value store_op) {
+VkAttachmentStoreOp translate_aso(RHIAttachmentStoreOp::Value store_op) {
 	static VkAttachmentStoreOp ops[] = {
 		VK_ATTACHMENT_STORE_OP_STORE,
 		VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -147,9 +157,13 @@ VkAttachmentStoreOp translate(RHIAttachmentStoreOp::Value store_op) {
 	assert((uint32_t)store_op < countof(ops));
 	return ops[(uint32_t)store_op];
 }
+VkAttachmentStoreOp translate(RHIAttachmentStoreOp::Value store_op) {
+	return translate_aso(store_op);
+}
 
+#define USE_ImageLayout_TRANSLATION
 #if defined(USE_ImageLayout_TRANSLATION)
-VkImageLayout translate(RHIImageLayout layout) {
+VkImageLayout translate(RHIImageLayout::Value layout) {
 	static VkImageLayout layouts[] = {
 		VK_IMAGE_LAYOUT_UNDEFINED,
 		VK_IMAGE_LAYOUT_GENERAL,
@@ -164,7 +178,7 @@ VkImageLayout translate(RHIImageLayout layout) {
 	assert((uint32_t)layout< countof(layouts));
 	return layouts[(uint32_t)layout];
 }
-VkImageLayout translate_il(RHIImageLayout layout) {
+VkImageLayout translate_il(RHIImageLayout::Value layout) {
 	return translate(layout);
 }
 #else
@@ -174,7 +188,7 @@ VkImageLayout translate_il(RHIImageLayout layout) {
 #endif
 
 #if defined(USE_PipelineStageFlags_TRANSLATION)
-VkPipelineStageFlags translate(RHIPipelineStageFlags pipeline_stage) {
+VkPipelineStageFlags translate(RHIPipelineStageFlags::Value pipeline_stage) {
 	switch (pipeline_stage) {
 	case RHIPipelineStageFlags::kTopOfPipe: return VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 	case RHIPipelineStageFlags::kDrawIndirect: return VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
@@ -198,7 +212,7 @@ VkPipelineStageFlags translate(RHIPipelineStageFlags pipeline_stage) {
 			return VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
 	};
 }
-VkPipelineStageFlags translate_ps(RHIPipelineStageFlags pipeline_stage) {
+VkPipelineStageFlags translate_ps(RHIPipelineStageFlags::Value pipeline_stage) {
 	return translate(pipeline_stage);
 }
 #else
@@ -208,7 +222,7 @@ VkPipelineStageFlags translate_ps(RHIPipelineStageFlags pipeline_stage) {
 #endif
 
 #if defined(USE_ACCESS_FLAGS_TRANSLATION)
-VkAccessFlags translate(RHIAccessFlags access_flags) {
+VkAccessFlags translate(RHIAccessFlags::Value access_flags) {
 	switch (access_flags) {
 	case RHIAccessFlags::kIndirectCommandRead: return VK_ACCESS_INDIRECT_COMMAND_READ_BIT ;
 		case RHIAccessFlags::kIndexRead: return VK_ACCESS_INDEX_READ_BIT ;
@@ -232,7 +246,7 @@ VkAccessFlags translate(RHIAccessFlags access_flags) {
 			return VK_ACCESS_FLAG_BITS_MAX_ENUM;
 	};
 }
-VkAccessFlags translate_af(RHIAccessFlags access_flags) {
+VkAccessFlags translate_af(RHIAccessFlags::Value access_flags) {
 	return translate(access_flags);
 }
 #else
@@ -241,15 +255,17 @@ VkAccessFlags translate_af(RHIAccessFlags access_flags) {
 }
 #endif
 
-#if 0
+#if defined(USE_DependencyFlags_TRANSLATION)
 VkDependencyFlags translate_dependency_flags(uint32_t dep_flags) {
 	uint32_t vk_dep_flags = (dep_flags & (uint32_t)RHIDependencyFlags::kByRegion) ? VK_DEPENDENCY_BY_REGION_BIT : 0;
 	vk_dep_flags |= (dep_flags & (uint32_t)RHIDependencyFlags::kDeviceGroup)? VK_DEPENDENCY_DEVICE_GROUP_BIT: 0;
 	vk_dep_flags |= (dep_flags & (uint32_t)RHIDependencyFlags::kViewLocal) ? VK_DEPENDENCY_VIEW_LOCAL_BIT: 0;
     return vk_dep_flags;
-};
+}
+#else
+#endif
 
-VkShaderStageFlagBits translate(RHIShaderStageFlags stage_flags) {
+VkShaderStageFlagBits translate(RHIShaderStageFlags::Value stage_flags) {
 	switch (stage_flags) {
 	case RHIShaderStageFlags::kVertex: return VK_SHADER_STAGE_VERTEX_BIT ;
 	case RHIShaderStageFlags::kTessellationControl: return VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
@@ -261,11 +277,13 @@ VkShaderStageFlagBits translate(RHIShaderStageFlags stage_flags) {
 		assert(0 && "Invalid shader stage flag!");
 		return VK_SHADER_STAGE_FLAG_BITS_MAX_ENUM;
 	}
-};
-#endif
+}
+VkShaderStageFlagBits translate_ssf(RHIShaderStageFlags::Value stage_flags) {
+	return translate(stage_flags);
+}
 
 #if defined(USE_PipelineBindPoint_TRANSLATION) 
-VkPipelineBindPoint translate(RHIPipelineBindPoint pipeline_bind_point) {
+VkPipelineBindPoint translate_pbp(RHIPipelineBindPoint::Value pipeline_bind_point) {
 	static VkPipelineBindPoint bind_points[] = {
 		VK_PIPELINE_BIND_POINT_GRAPHICS,
 		VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -274,8 +292,8 @@ VkPipelineBindPoint translate(RHIPipelineBindPoint pipeline_bind_point) {
 	assert((uint32_t)pipeline_bind_point < countof(bind_points));
 	return bind_points[(uint32_t)pipeline_bind_point];
 }
-VkPipelineBindPoint translate_pbp(RHIPipelineBindPoint pipeline_bind_point) {
-	return translate(pipeline_bind_point);
+VkPipelineBindPoint translate(RHIPipelineBindPoint::Value pipeline_bind_point) {
+	return translate_pbp(pipeline_bind_point);
 }
 #else
 VkPipelineBindPoint translate_pbp(RHIPipelineBindPoint pipeline_bind_point) {
@@ -310,8 +328,7 @@ VkVertexInputRate translate_vir(RHIVertexInputRate input_rate) {
 }
 #endif
 
-#if 0
-VkPrimitiveTopology translate(RHIPrimitiveTopology prim_topology) {
+VkPrimitiveTopology translate(RHIPrimitiveTopology::Value prim_topology) {
 	switch (prim_topology) {
 	case RHIPrimitiveTopology::kPointList: return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
 	case RHIPrimitiveTopology::kLineList: return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
@@ -329,8 +346,11 @@ VkPrimitiveTopology translate(RHIPrimitiveTopology prim_topology) {
 		return VK_PRIMITIVE_TOPOLOGY_MAX_ENUM;
 	}
 } 
+VkPrimitiveTopology translate_pt(RHIPrimitiveTopology::Value prim_topology) {
+	return translate(prim_topology);
+}
 
-VkPolygonMode translate(RHIPolygonMode polygon_mode) {
+VkPolygonMode translate_pm(RHIPolygonMode::Value polygon_mode) {
 	switch (polygon_mode) {
 	case RHIPolygonMode::kFill : return VK_POLYGON_MODE_FILL;
 	case RHIPolygonMode::kLine: return VK_POLYGON_MODE_LINE;
@@ -340,8 +360,11 @@ VkPolygonMode translate(RHIPolygonMode polygon_mode) {
 		return VK_POLYGON_MODE_MAX_ENUM;
 	}
 };
+VkPolygonMode translate(RHIPolygonMode::Value polygon_mode) {
+	return translate_pm(polygon_mode);
+}
   
-VkCullModeFlags translate(RHICullModeFlags cull_mode) {
+VkCullModeFlags translate_cm(RHICullModeFlags::Value cull_mode) {
 	switch (cull_mode) {
 	case RHICullModeFlags::kNone: return VK_CULL_MODE_NONE;
 	case RHICullModeFlags::kFront: return VK_CULL_MODE_FRONT_BIT;
@@ -352,13 +375,19 @@ VkCullModeFlags translate(RHICullModeFlags cull_mode) {
 		return VK_CULL_MODE_FLAG_BITS_MAX_ENUM;
 	}
 };
+VkCullModeFlags translate(RHICullModeFlags::Value cull_mode) {
+	return translate_cm(cull_mode);
+}
 
-VkFrontFace translate(RHIFrontFace front_face) {
+VkFrontFace translate_ff(RHIFrontFace::Value front_face) {
 	return front_face == RHIFrontFace::kClockwise ? VK_FRONT_FACE_CLOCKWISE
 												  : VK_FRONT_FACE_COUNTER_CLOCKWISE;
 };
+VkFrontFace translate(RHIFrontFace::Value front_face) {
+	return translate_ff(front_face);
+}
 
-VkBlendFactor translate(RHIBlendFactor blend_factor) {
+VkBlendFactor translate_bf(RHIBlendFactor::Value blend_factor) {
 	switch (blend_factor) {
 	case RHIBlendFactor::Zero: return VK_BLEND_FACTOR_ZERO;
 	case RHIBlendFactor::One: return VK_BLEND_FACTOR_ONE;
@@ -375,8 +404,11 @@ VkBlendFactor translate(RHIBlendFactor blend_factor) {
 		return VK_BLEND_FACTOR_MAX_ENUM;
 	}
 }
+VkBlendFactor translate(RHIBlendFactor::Value blend_factor) {
+	return translate_bf(blend_factor);
+}
 
-VkBlendOp translate(RHIBlendOp blend_op) {
+VkBlendOp translate_bo(RHIBlendOp::Value blend_op) {
 	switch (blend_op) {
 	case RHIBlendOp::kAdd: return VK_BLEND_OP_ADD;
 	case RHIBlendOp::kSubtract: return VK_BLEND_OP_SUBTRACT;
@@ -388,6 +420,9 @@ VkBlendOp translate(RHIBlendOp blend_op) {
 		return VK_BLEND_OP_MAX_ENUM;
 	}
 }
+VkBlendOp translate(RHIBlendOp::Value blend_op) {
+	return translate_bo(blend_op);
+}
 
 VkColorComponentFlags translate_color_comp(uint32_t col_cmp_flags) {
     VkColorComponentFlags flags;
@@ -398,7 +433,7 @@ VkColorComponentFlags translate_color_comp(uint32_t col_cmp_flags) {
     return flags;
 }
 
-VkLogicOp translate(RHILogicOp logic_op) {
+VkLogicOp translate_lo(RHILogicOp::Value logic_op) {
 	switch (logic_op) {
 	case RHILogicOp::kClear: return VK_LOGIC_OP_CLEAR;
 	case RHILogicOp::kAnd:return VK_LOGIC_OP_AND;
@@ -421,6 +456,9 @@ VkLogicOp translate(RHILogicOp logic_op) {
 		return VK_LOGIC_OP_MAX_ENUM;
 	}
 }
+VkLogicOp translate(RHILogicOp::Value logic_op) {
+	return translate_lo(logic_op);
+}
 
 VkBufferUsageFlags translate_buffer_usage(uint32_t usage) {
 
@@ -435,7 +473,7 @@ VkBufferUsageFlags translate_buffer_usage(uint32_t usage) {
     return vk_usage;
 };
 
-VkSharingMode translate(RHISharingMode sharing_mode) {
+VkSharingMode translate_sharing_mode(RHISharingMode::Value sharing_mode) {
     return sharing_mode == RHISharingMode::kConcurrent ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
 }
 
@@ -450,9 +488,6 @@ VkMemoryPropertyFlags translate_mem_prop(uint32_t memprop) {
     vk_flags |= (memprop & RHIMemoryPropertyFlags::kDeviceUncachedAMD) ? VK_MEMORY_PROPERTY_DEVICE_UNCACHED_BIT_AMD : 0;
     return vk_flags;
 }
-
-#endif
-
 
 ////////////// Image //////////////////////////////////////////////////
 
@@ -472,7 +507,6 @@ void RHIImageViewVk::Destroy(IRHIDevice* device) {
 	vkDestroyImageView(dev->Handle(), handle_, dev->Allocator());
 }
 
-#if 0
 
 ////////////// Frame Buffer //////////////////////////////////////////////////
 
@@ -482,6 +516,7 @@ void RHIFrameBufferVk::Destroy(IRHIDevice* device) {
 	delete this;
 }
 
+#if 0
 ////////////// Render Pass //////////////////////////////////////////////////
 
 void RHIRenderPassVk::Destroy(IRHIDevice* device) {
@@ -489,6 +524,8 @@ void RHIRenderPassVk::Destroy(IRHIDevice* device) {
 	vkDestroyRenderPass(dev->Handle(), handle_, dev->Allocator());
 	delete this;
 }
+
+#endif
 
 ////////////// Shader //////////////////////////////////////////////////
 
@@ -499,7 +536,7 @@ void RHIShaderVk::Destroy(IRHIDevice* device) {
 }
 
 RHIShaderVk *RHIShaderVk::Create(IRHIDevice *device, const uint32_t *pdata, uint32_t size,
-								 RHIShaderStageFlags stage) {
+								 RHIShaderStageFlags::Value stage) {
 	VkShaderModuleCreateInfo ci = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, nullptr, 0, size,
 								   pdata};
 
@@ -514,11 +551,12 @@ RHIShaderVk *RHIShaderVk::Create(IRHIDevice *device, const uint32_t *pdata, uint
 	shader->shader_module_ = shader_module;
 	shader->code_.resize(size);
 	memcpy(shader->code_.data(), pdata, size);
-	shader->vk_stage_ = translate(stage);
+	shader->vk_stage_ = translate_ssf(stage);
 	shader->stage_ = stage;
 
 	return shader;
 }
+
 
 ////////////// Pipeline Layout //////////////////////////////////////////////////
 
@@ -575,7 +613,7 @@ RHIGraphicsPipelineVk *RHIGraphicsPipelineVk::Create(
 			VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
 			nullptr,
 			0,
-			translate(shader_stage[i].stage),
+			translate_ssf(shader_stage[i].stage),
 			ResourceCast(shader_stage[i].module)->Handle(),
 			shader_stage[i].pEntryPointName,
 			nullptr
@@ -587,7 +625,7 @@ RHIGraphicsPipelineVk *RHIGraphicsPipelineVk::Create(
 	for (uint32_t i = 0; i < (uint32_t)vertex_input_bindings.size(); ++i) {
 		vertex_input_bindings[i].binding = vertex_input_state->pVertexBindingDesc[i].binding;
 		vertex_input_bindings[i].stride = vertex_input_state->pVertexBindingDesc[i].stride;
-		vertex_input_bindings[i].inputRate = translate(vertex_input_state->pVertexBindingDesc[i].inputRate);
+		vertex_input_bindings[i].inputRate = translate_vir(vertex_input_state->pVertexBindingDesc[i].inputRate);
 	}
 
 	std::vector<VkVertexInputAttributeDescription> vertex_input_attributes(
@@ -595,7 +633,7 @@ RHIGraphicsPipelineVk *RHIGraphicsPipelineVk::Create(
 	for (uint32_t i = 0; i < (uint32_t)vertex_input_attributes.size(); ++i) {
 		vertex_input_attributes[i].location = vertex_input_state->pVertexAttributeDesc[i].location;
 		vertex_input_attributes[i].binding = vertex_input_state->pVertexAttributeDesc[i].binding;
-		vertex_input_attributes[i].format = translate(vertex_input_state->pVertexAttributeDesc[i].format);
+		vertex_input_attributes[i].format = translate_f(vertex_input_state->pVertexAttributeDesc[i].format);
 		vertex_input_attributes[i].offset = vertex_input_state->pVertexAttributeDesc[i].offset;
 	}
 
@@ -613,7 +651,7 @@ RHIGraphicsPipelineVk *RHIGraphicsPipelineVk::Create(
       VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
       nullptr,
       0,
-      translate(input_assembly_state->topology),
+      translate_pt(input_assembly_state->topology),
 	  input_assembly_state->primitiveRestartEnable
     };
 
@@ -652,9 +690,9 @@ RHIGraphicsPipelineVk *RHIGraphicsPipelineVk::Create(
 		0,
 		raster_state->depthClampEnable,
 		raster_state->rasterizerDiscardEnable,
-		translate(raster_state->polygonMode),
-		translate(raster_state->cullMode),
-		translate(raster_state->frontFace),
+		translate_pm(raster_state->polygonMode),
+		translate_cm(raster_state->cullMode),
+		translate_ff(raster_state->frontFace),
 		raster_state->depthBiasEnable,
         raster_state->depthBiasConstantFactor,
         raster_state->depthBiasClamp,
@@ -680,12 +718,12 @@ RHIGraphicsPipelineVk *RHIGraphicsPipelineVk::Create(
 		const RHIColorBlendAttachmentState* cb_state = color_blend_state->pAttachments + i;
 		VkPipelineColorBlendAttachmentState state;
 		state.blendEnable = cb_state->blendEnable;
-		state.srcColorBlendFactor = translate(cb_state->srcColorBlendFactor);
-		state.dstColorBlendFactor = translate(cb_state->dstColorBlendFactor);
-		state.colorBlendOp = translate(cb_state->colorBlendOp);
-		state.srcAlphaBlendFactor = translate(cb_state->srcAlphaBlendFactor);
-		state.dstAlphaBlendFactor = translate(cb_state->dstAlphaBlendFactor);
-		state.alphaBlendOp = translate(cb_state->alphaBlendOp);
+		state.srcColorBlendFactor = translate_bf(cb_state->srcColorBlendFactor);
+		state.dstColorBlendFactor = translate_bf(cb_state->dstColorBlendFactor);
+		state.colorBlendOp = translate_bo(cb_state->colorBlendOp);
+		state.srcAlphaBlendFactor = translate_bf(cb_state->srcAlphaBlendFactor);
+		state.dstAlphaBlendFactor = translate_bf(cb_state->dstAlphaBlendFactor);
+		state.alphaBlendOp = translate_bo(cb_state->alphaBlendOp);
 		state.colorWriteMask = translate_color_comp(cb_state->colorWriteMask);
 
 		arr_color_blend_attachment_state.push_back(state);
@@ -696,7 +734,7 @@ RHIGraphicsPipelineVk *RHIGraphicsPipelineVk::Create(
 		nullptr,						  // const void                                    *pNext
 		0,								  // VkPipelineColorBlendStateCreateFlags           flags
 		color_blend_state->logicOpEnable, // VkBool32 logicOpEnable
-		translate(color_blend_state->logicOp),			   // VkLogicOp logicOp
+		translate_lo(color_blend_state->logicOp),			   // VkLogicOp logicOp
 		(uint32_t)arr_color_blend_attachment_state.size(), // uint32_t attachmentCount
 		arr_color_blend_attachment_state.data(), 
 		{
@@ -725,7 +763,7 @@ RHIGraphicsPipelineVk *RHIGraphicsPipelineVk::Create(
       nullptr,                                                      // const VkPipelineDepthStencilStateCreateInfo   *pDepthStencilState
       &color_blend_state_create_info,                               // const VkPipelineColorBlendStateCreateInfo     *pColorBlendState
       nullptr,                                                      // const VkPipelineDynamicStateCreateInfo        *pDynamicState
-      playout ? playout->Handle() : nullptr,                        // VkPipelineLayout                               layout
+      playout ? playout->Handle() : VK_NULL_HANDLE,                 // VkPipelineLayout                               layout
       render_pass->Handle(),                                        // VkRenderPass                                   renderPass
       0,                                                            // uint32_t                                       subpass
       VK_NULL_HANDLE,                                               // VkPipeline                                     basePipelineHandle
@@ -744,16 +782,21 @@ RHIGraphicsPipelineVk *RHIGraphicsPipelineVk::Create(
 	return vk_pipeline;
 }
 
+////////////////////////////////////////////////////////////////////////
+IRHIShader* RHIDeviceVk::CreateShader(RHIShaderStageFlags::Value stage, const uint32_t *pdata, uint32_t size) {
+    return RHIShaderVk::Create(this, pdata, size, stage);
+}
+
 
 ////////////// Buffer //////////////////////////////////////////////////
-RHIBufferVk* RHIBufferVk::Create(IRHIDevice* device, uint32_t size, uint32_t usage, uint32_t memprop, RHISharingMode sharing) {
+RHIBufferVk* RHIBufferVk::Create(IRHIDevice* device, uint32_t size, uint32_t usage, uint32_t memprop, RHISharingMode::Value sharing) {
     VkBufferCreateInfo buffer_create_info = {
         VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,             // VkStructureType        sType
         nullptr,                                          // const void            *pNext
         0,                                                // VkBufferCreateFlags    flags
         size,                                            // VkDeviceSize           size
         translate_buffer_usage(usage),                // VkBufferUsageFlags     usage
-        translate(sharing),                        // VkSharingMode          sharingMode
+        translate_sharing_mode(sharing),				// VkSharingMode          sharingMode
         0,                                                // uint32_t               queueFamilyIndexCount
         nullptr                                           // const uint32_t        *pQueueFamilyIndices
     };
@@ -852,11 +895,6 @@ void RHIBufferVk::Unmap(IRHIDevice* device) {
     is_mapped_ = false;
 }
 
-////////////////////////////////////////////////////////////////////////
-IRHIShader* RHIDeviceVk::CreateShader(RHIShaderStageFlags stage, const uint32_t *pdata, uint32_t size) {
-    return RHIShaderVk::Create(this, pdata, size, stage);
-}
-
 /////////////////////// Fence //////////////////////////////////////////////////
 void RHIFenceVk::Reset(IRHIDevice *device) {
 	RHIDeviceVk *dev = ResourceCast(device);
@@ -938,8 +976,6 @@ RHIEventVk *RHIEventVk::Create(IRHIDevice *device) {
 	return event;
 }
 
-#endif
-
 ////////////// Command buffer //////////////////////////////////////////////////
 
 void Barrier(VkCommandBuffer cb, RHIImageVk* image,
@@ -980,9 +1016,9 @@ void Barrier(VkCommandBuffer cb, RHIImageVk* image,
 	image->vk_layout_ = new_layout;
 }
 
-void RHICmdBufVk::BufferBarrier(IRHIBuffer *i_buffer, RHIAccessFlags src_acc_flags,
-								RHIPipelineStageFlags src_stage, RHIAccessFlags dst_acc_fags,
-								RHIPipelineStageFlags dst_stage) {
+void RHICmdBufVk::BufferBarrier(IRHIBuffer *i_buffer, RHIAccessFlags::Value src_acc_flags,
+								RHIPipelineStageFlags::Value src_stage, RHIAccessFlags::Value dst_acc_fags,
+								RHIPipelineStageFlags::Value dst_stage) {
 	RHIBufferVk* buffer = ResourceCast(i_buffer);
 
     VkBufferMemoryBarrier buffer_memory_barrier = {
@@ -1077,7 +1113,7 @@ bool RHICmdBufVk::BeginRenderPass(IRHIRenderPass *i_rp, IRHIFrameBuffer *i_fb, c
     return true;
 }
 
-void RHICmdBufVk::BindPipeline(RHIPipelineBindPoint bind_point, IRHIGraphicsPipeline* i_pipeline) {
+void RHICmdBufVk::BindPipeline(RHIPipelineBindPoint::Value bind_point, IRHIGraphicsPipeline* i_pipeline) {
     assert(is_recording_);
     const RHIGraphicsPipelineVk* pipeline = ResourceCast(i_pipeline);
 
@@ -1117,11 +1153,11 @@ void RHICmdBufVk::CopyBuffer(class IRHIBuffer *i_dst, uint32_t dst_offset, class
     vkCmdCopyBuffer(cb_, src->Handle(), dst->Handle(), 1, &buffer_copy_info );
 }
 
-void RHICmdBufVk::SetEvent(IRHIEvent* i_event, RHIPipelineStageFlags stage) {
+void RHICmdBufVk::SetEvent(IRHIEvent* i_event, RHIPipelineStageFlags::Value stage) {
     const RHIEventVk* event = ResourceCast(i_event); 
     vkCmdSetEvent(cb_, event->Handle(), translate_ps(stage));
 }
-void RHICmdBufVk::ResetEvent(IRHIEvent* i_event, RHIPipelineStageFlags stage) {
+void RHICmdBufVk::ResetEvent(IRHIEvent* i_event, RHIPipelineStageFlags::Value stage) {
     const RHIEventVk* event = ResourceCast(i_event); 
     vkCmdResetEvent(cb_, event->Handle(), translate_ps(stage));
 }
@@ -1232,7 +1268,6 @@ IRHICmdBuf* RHIDeviceVk::CreateCommandBuffer(RHIQueueType::Value queue_type) {
 
 }
 
-#if 0
 ////////////////////////////////////////////////////////////////////////////////
 IRHIRenderPass* RHIDeviceVk::CreateRenderPass(const RHIRenderPassDesc* desc) {
 	assert(desc);
@@ -1243,18 +1278,18 @@ IRHIRenderPass* RHIDeviceVk::CreateRenderPass(const RHIRenderPassDesc* desc) {
 	std::vector<VkAttachmentReference> depth_stencil_ref_arr;
 	std::vector<VkSubpassDependency> dep_arr(desc->dependencyCount);
 
-	std::vector<RHIImageLayout> att_final_layouts(desc->attachmentCount);
+	std::vector<RHIImageLayout::Value> att_final_layouts(desc->attachmentCount);
 	RHIAttachmentDesc* att_desc = desc->attachmentDesc;
 	for (int i = 0; i < desc->attachmentCount; ++i) {
 		att_desc_arr[i].flags = 0;
-		att_desc_arr[i].format = translate(att_desc[i].format);
+		att_desc_arr[i].format = translate_f(att_desc[i].format);
 		att_desc_arr[i].samples = translate_num_samples(att_desc[i].numSamples);
-		att_desc_arr[i].loadOp = translate(att_desc[i].loadOp);
-		att_desc_arr[i].storeOp = translate(att_desc[i].storeOp);
-		att_desc_arr[i].stencilLoadOp = translate(att_desc[i].stencilLoadOp);
-		att_desc_arr[i].stencilStoreOp = translate(att_desc[i].stencilStoreOp);
-		att_desc_arr[i].initialLayout = translate(att_desc[i].initialLayout);
-		att_desc_arr[i].finalLayout = translate(att_desc[i].finalLayout);
+		att_desc_arr[i].loadOp = translate_alo(att_desc[i].loadOp);
+		att_desc_arr[i].storeOp = translate_aso(att_desc[i].storeOp);
+		att_desc_arr[i].stencilLoadOp = translate_alo(att_desc[i].stencilLoadOp);
+		att_desc_arr[i].stencilStoreOp = translate_aso(att_desc[i].stencilStoreOp);
+		att_desc_arr[i].initialLayout = translate_il(att_desc[i].initialLayout);
+		att_desc_arr[i].finalLayout = translate_il(att_desc[i].finalLayout);
 
         att_final_layouts[i] = att_desc[i].finalLayout;
 	}
@@ -1262,7 +1297,7 @@ IRHIRenderPass* RHIDeviceVk::CreateRenderPass(const RHIRenderPassDesc* desc) {
 	for (int i = 0; i < desc->subpassCount; ++i) {
 		const RHISubpassDesc& sp_desc = desc->subpassDesc[i];
 		subpass_desc_arr[i].flags = 0;
-		subpass_desc_arr[i].pipelineBindPoint = translate(sp_desc.bindPoint);
+		subpass_desc_arr[i].pipelineBindPoint = translate_pbp(sp_desc.bindPoint);
 		subpass_desc_arr[i].inputAttachmentCount = sp_desc.inputAttachmentCount;
 		subpass_desc_arr[i].colorAttachmentCount = sp_desc.colorAttachmentCount;
 		subpass_desc_arr[i].preserveAttachmentCount = sp_desc.preserveAttachmentCount;
@@ -1359,8 +1394,8 @@ IRHIImageView* RHIDeviceVk::CreateImageView(const RHIImageViewDesc* desc) {
 	VkImageViewCreateInfo ci{};
 	ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 	ci.image = image->Handle();
-	ci.viewType = translate(desc->viewType);
-	ci.format = translate(desc->format);
+	ci.viewType = translate_ivt(desc->viewType);
+	ci.format = translate_f(desc->format);
 	ci.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
 	ci.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
 	ci.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -1398,7 +1433,7 @@ IRHIPipelineLayout* RHIDeviceVk::CreatePipelineLayout(IRHIDescriptorSetLayout* d
 }
 
 IRHIBuffer *RHIDeviceVk::CreateBuffer(uint32_t size, uint32_t usage, uint32_t memprop_flags,
-									  RHISharingMode sharing) {
+									  RHISharingMode::Value sharing) {
 	return RHIBufferVk::Create(this, size, usage, memprop_flags, sharing);
 };
 
@@ -1410,7 +1445,6 @@ IRHIEvent *RHIDeviceVk::CreateEvent() {
 	return RHIEventVk::Create(this);
 };
 
-#endif
 
 bool RHIDeviceVk::BeginFrame() {
 	cur_frame_++;
@@ -1571,6 +1605,10 @@ bool RHIDeviceVk::OnWindowSizeChanged(uint32_t width, uint32_t height, bool full
 
 	dev_.swap_chain_data_ = new_swapchain_data;
 	dev_.swap_chain_ = new_swapchain;
+
+	if (fp_swap_chain_recreated_) {
+		fp_swap_chain_recreated_(user_ptr_);
+	}
 
 	return true;
 }

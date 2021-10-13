@@ -11,6 +11,7 @@
 class RHIImageVk;
 class RHIImageViewVk;
 
+
 struct QueueFamilies {
 	uint32_t graphics_;// = 0xffffffff;
 	uint32_t compute_;// = 0xffffffff;
@@ -115,15 +116,15 @@ class RHIImageViewVk: public IRHIImageView  {
 };
 
 ////////////////////////////////////////////////////////////////////////////////
-class RHIShaderVk {
+class RHIShaderVk: public IRHIShader {
 	VkShaderModule shader_module_;
 	std::vector<uint32_t> code_;//do we need this?
-	RHIShaderStageFlags stage_;
+	RHIShaderStageFlags::Value stage_;
 	VkShaderStageFlags vk_stage_;
-	~RHIShaderVk();// = default;
+	~RHIShaderVk() = default;
 public:
 	void Destroy(IRHIDevice* device);
-	static RHIShaderVk* Create(IRHIDevice* device, const uint32_t* pdata, uint32_t size, RHIShaderStageFlags stage);
+	static RHIShaderVk* Create(IRHIDevice* device, const uint32_t* pdata, uint32_t size, RHIShaderStageFlags::Value stage);
 	//const unsigned char* code() const { return code_.get(); }
 	VkShaderModule Handle() const { return shader_module_; }
 };
@@ -168,7 +169,7 @@ class RHIBufferVk : public IRHIBuffer {
     uint32_t mapped_flags_;
 
 public:
-	static RHIBufferVk* Create(IRHIDevice* device, uint32_t size, uint32_t usage, uint32_t memprop, RHISharingMode sharing);
+	static RHIBufferVk* Create(IRHIDevice* device, uint32_t size, uint32_t usage, uint32_t memprop, RHISharingMode::Value sharing);
 	void Destroy(IRHIDevice *device);
 
     void* Map(IRHIDevice* device, uint32_t offset, uint32_t size, uint32_t map_flags);
@@ -184,8 +185,8 @@ class RHIFenceVk: public IRHIFence {
 
         //TODO: add variables to cache the state
 
-		RHIFenceVk();// = default;
-        ~RHIFenceVk();// = default;
+		RHIFenceVk() = default;
+        ~RHIFenceVk() = default;
     public:
         virtual void Reset(IRHIDevice *device) ;
         virtual void Wait(IRHIDevice *device, uint64_t timeout) ;
@@ -226,9 +227,9 @@ public:
 	virtual void Barrier_PresentToDraw(IRHIImage* image) ;
 	virtual void Barrier_DrawToPresent(IRHIImage* image) ;
 
-	virtual void BufferBarrier(IRHIBuffer *i_buffer, RHIAccessFlags src_acc_flags,
-							   RHIPipelineStageFlags src_stage, RHIAccessFlags dst_acc_fags,
-							   RHIPipelineStageFlags dst_stage) ;
+	virtual void BufferBarrier(IRHIBuffer *i_buffer, RHIAccessFlags::Value src_acc_flags,
+							   RHIPipelineStageFlags::Value src_stage, RHIAccessFlags::Value dst_acc_fags,
+							   RHIPipelineStageFlags::Value dst_stage) ;
 
 	virtual bool Begin() ;
 	virtual bool BeginRenderPass(IRHIRenderPass *i_rp, IRHIFrameBuffer *i_fb, const ivec4 *render_area,
@@ -240,13 +241,13 @@ public:
 	virtual void CopyBuffer(class IRHIBuffer *dst, uint32_t dst_offset, class IRHIBuffer *src,
 							uint32_t src_offset, uint32_t size) ;
 
-    virtual void SetEvent(IRHIEvent* event, RHIPipelineStageFlags stage) ;
-    virtual void ResetEvent(IRHIEvent* event, RHIPipelineStageFlags stage) ;
+    virtual void SetEvent(IRHIEvent* event, RHIPipelineStageFlags::Value stage) ;
+    virtual void ResetEvent(IRHIEvent* event, RHIPipelineStageFlags::Value stage) ;
 
 	virtual bool End() ;
 	virtual void EndRenderPass(const IRHIRenderPass *i_rp, IRHIFrameBuffer *i_fb) ;
 	virtual void Clear(IRHIImage* image_in, const vec4& color, uint32_t img_aspect_bits) ;
-	virtual void BindPipeline(RHIPipelineBindPoint bind_point, IRHIGraphicsPipeline* pipeline) ;
+	virtual void BindPipeline(RHIPipelineBindPoint::Value bind_point, IRHIGraphicsPipeline* pipeline) ;
 
 };
 
@@ -255,11 +256,11 @@ public:
 class RHIFrameBufferVk: public IRHIFrameBuffer {
 	VkFramebuffer handle_;
     std::vector<RHIImageViewVk*> attachments_;
-	virtual ~RHIFrameBufferVk();// = default;
+	virtual ~RHIFrameBufferVk() = default;
 public:
   RHIFrameBufferVk(VkFramebuffer fb, std::vector<RHIImageViewVk *> attachments)
 	  : handle_(fb), attachments_(attachments) {}
-  void Destroy(IRHIDevice *);
+  virtual void Destroy(IRHIDevice *) override;
   VkFramebuffer Handle() const { return handle_; }
   const std::vector<RHIImageViewVk*> GetAttachments() const {
       return attachments_;
@@ -268,16 +269,16 @@ public:
 
 class RHIRenderPassVk: public IRHIRenderPass {
 	VkRenderPass handle_;
-	std::vector<RHIImageLayout> att_final_layouts_;
-	virtual ~RHIRenderPassVk() ;//=default;
+	std::vector<RHIImageLayout::Value> att_final_layouts_;
+	virtual ~RHIRenderPassVk() =default;
 
   public:
-	RHIRenderPassVk(VkRenderPass rp, std::vector<RHIImageLayout> att_final_layouts)
+	RHIRenderPassVk(VkRenderPass rp, std::vector<RHIImageLayout::Value> att_final_layouts)
 		: handle_(rp), att_final_layouts_(att_final_layouts) {}
 	void Destroy(IRHIDevice *device);
 	VkRenderPass Handle() const { return handle_; }
 
-	RHIImageLayout GetFinalLayout(uint32_t i) const {
+	RHIImageLayout::Value GetFinalLayout(uint32_t i) const {
 		assert(att_final_layouts_.size() > i);
 		return att_final_layouts_[i];
 	}
@@ -297,17 +298,21 @@ class RHIDeviceVk: public IRHIDevice {
 	uint32_t cur_swap_chain_img_idx_;// = 0xffffffff;
 	bool between_begin_frame;// = false;
 
+	fpOnSwapChainRecreated fp_swap_chain_recreated_;
+	void* user_ptr_;
+
 public:
-	explicit RHIDeviceVk(VulkanDevice& device) : dev_(device), prev_frame_(-1), cur_frame_(-1), cur_swap_chain_img_idx_(0xffffffff), between_begin_frame(false) {}
+	explicit RHIDeviceVk(VulkanDevice &device)
+		: dev_(device), prev_frame_(-1), cur_frame_(-1), cur_swap_chain_img_idx_(0xffffffff),
+		  between_begin_frame(false), fp_swap_chain_recreated_(nullptr), user_ptr_(nullptr) {}
 
 	// interface implementation
 	virtual ~RHIDeviceVk() {};
 	virtual IRHICmdBuf* CreateCommandBuffer(RHIQueueType::Value queue_type) ;
-#if 0
 	virtual IRHIRenderPass* CreateRenderPass(const RHIRenderPassDesc* desc) ;
 	virtual IRHIFrameBuffer* CreateFrameBuffer(RHIFrameBufferDesc* desc, const IRHIRenderPass* rp_in) ;
 	virtual IRHIImageView* CreateImageView(const RHIImageViewDesc* desc) ;
-	virtual IRHIBuffer* CreateBuffer(uint32_t size, uint32_t usage, uint32_t memprop, RHISharingMode sharing) ;
+	virtual IRHIBuffer* CreateBuffer(uint32_t size, uint32_t usage, uint32_t memprop, RHISharingMode::Value sharing) ;
 
     virtual IRHIFence* CreateFence(bool create_signalled) ;
     virtual IRHIEvent* CreateEvent() ;
@@ -321,9 +326,8 @@ public:
             const IRHIRenderPass *i_render_pass) ;
 
     virtual IRHIPipelineLayout* CreatePipelineLayout(IRHIDescriptorSetLayout* desc_set_layout) ;
-    virtual IRHIShader* CreateShader(RHIShaderStageFlags stage, const uint32_t *pdata, uint32_t size) ;
+    virtual IRHIShader* CreateShader(RHIShaderStageFlags::Value stage, const uint32_t *pdata, uint32_t size) ;
 
-#endif
 	virtual RHIFormat GetSwapChainFormat() ;
 	virtual uint32_t GetSwapChainSize()  { return (uint32_t)dev_.swap_chain_.images_.size(); }
 	virtual class IRHIImageView* GetSwapChainImageView(uint32_t index) ;
@@ -344,5 +348,9 @@ public:
 	VkAllocationCallbacks* Allocator() const { return dev_.pallocator_; }
 
 	virtual bool OnWindowSizeChanged(uint32_t width, uint32_t height, bool fullscreen) override;
+	virtual void SetOnSwapChainRecreatedCallback(fpOnSwapChainRecreated callback, void* user_ptr) override {
+		fp_swap_chain_recreated_ = callback;
+		user_ptr_ = user_ptr;
+	}
 };
 

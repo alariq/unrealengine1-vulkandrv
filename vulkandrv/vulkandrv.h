@@ -89,4 +89,6 @@ public:
 	virtual void PostDrawGouraud(FLOAT FogDistance);
 	//@}
 	#endif
+
+	static void OnSwapChainRecreated(void* user_ptr);
 };

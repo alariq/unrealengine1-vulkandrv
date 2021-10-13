@@ -9,10 +9,13 @@
 #include <FCNTL.H>
 #include <stdlib.h>     // for _itow 
 #include <new>
+#include <vector>
 
 //#include "resource.h"
 #include "vulkandrv.h"
 #include "utils/logging.h"
+#include "utils/macros.h"
+#include "utils/file_utils.h"
 //#include "texconverter.h"
 //#include "customflags.h"
 #include "misc.h"
@@ -44,10 +47,39 @@ static LARGE_INTEGER perfCounterFreq;
 //static Shader_ComplexSurface *shader_ComplexSurface;
 //static Shader_FogSurface *shader_FogSurface;
 
+struct SimpleVertex {
+    vec4 pos;
+    vec4 color;
+};
+
+RHIVertexInputBindingDesc vert_bindings_desc[] = {
+	{0, sizeof(SimpleVertex), RHIVertexInputRate::kVertex}};
+
+RHIVertexInputAttributeDesc va_desc[] = {
+	{0, vert_bindings_desc[0].binding, RHIFormat::kR32G32B32A32_SFLOAT,
+	 offsetof(SimpleVertex, pos)},
+	{1, vert_bindings_desc[0].binding, RHIFormat::kR32G32B32A32_SFLOAT,
+	 offsetof(SimpleVertex, color)}};
+
+// Create Test Vertex Buffer
+SimpleVertex vb[] = {{{-0.55f, -0.55f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 0.0f}},
+					 {{-0.55f, 0.55f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f, 0.0f}},
+					 {{0.55f, -0.55f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 0.0f}},
+					 {{0.55f, 0.55f, 0.0f, 1.0f}, {0.45f, 0.45f, 0.45f, 0.0f}}};
+
 static int g_curCBIdx = 0;
 static int g_curFBIdx = 0;
 static IRHIDevice* g_vulkan_device = 0;
 static IRHICmdBuf* g_cmdbuf[kNumBufferedFrames] = { 0 };
+
+IRHIBuffer* g_quad_gpu_vb = nullptr;
+IRHIBuffer* g_quad_staging_vb = nullptr;
+IRHIEvent* g_quad_vb_copy_event= nullptr;	
+IRHIRenderPass* g_main_pass = nullptr;
+std::vector<IRHIFrameBuffer*> g_main_fb;
+
+IRHIGraphicsPipeline *g_tri_pipeline = nullptr;
+IRHIGraphicsPipeline *g_quad_pipeline = nullptr;
 
 
 /**
@@ -206,6 +238,7 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 
 	g_vulkan_device = create_device();
 	assert(g_vulkan_device);
+	g_vulkan_device->SetOnSwapChainRecreatedCallback(UVulkanRenderDevice::OnSwapChainRecreated, this);
 
 	IRHIDevice* device = g_vulkan_device;
 	for (size_t i = 0; i < kNumBufferedFrames; ++i) {
@@ -213,8 +246,200 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	}
 	g_curCBIdx = 0;
 
-	if(!UVulkanRenderDevice::SetRes(NewX,NewY,NewColorBytes,Fullscreen))
-	{
+	g_quad_staging_vb =
+		device->CreateBuffer(sizeof(vb), RHIBufferUsageFlags::kTransferSrcBit,
+							 RHIMemoryPropertyFlags::kHostVisible, RHISharingMode::kExclusive);
+
+	g_quad_gpu_vb = device->CreateBuffer(
+		sizeof(vb), RHIBufferUsageFlags::kVertexBufferBit | RHIBufferUsageFlags::kTransferDstBit,
+		RHIMemoryPropertyFlags::kDeviceLocal, RHISharingMode::kExclusive);
+
+	assert(g_quad_gpu_vb);
+	assert(g_quad_staging_vb);
+	uint8_t *memptr = (uint8_t *)g_quad_staging_vb->Map(device, 0, sizeof(vb), 0);
+	memcpy(memptr, vb, sizeof(vb));
+	g_quad_staging_vb->Unmap(device);
+
+	g_quad_vb_copy_event = device->CreateEvent();
+
+	RHIAttachmentDesc att_desc;
+	att_desc.format = device->GetSwapChainFormat();
+	att_desc.numSamples = 1;
+	att_desc.loadOp = RHIAttachmentLoadOp::kClear;
+	att_desc.storeOp = RHIAttachmentStoreOp::kStore;
+	att_desc.stencilLoadOp = RHIAttachmentLoadOp::kDoNotCare;
+	att_desc.stencilStoreOp = RHIAttachmentStoreOp::kDoNotCare;
+	att_desc.initialLayout = RHIImageLayout::kUndefined;
+	att_desc.finalLayout = RHIImageLayout::kPresent;
+
+	RHIAttachmentRef color_att_ref = {0, RHIImageLayout::kColorOptimal};
+
+	RHISubpassDesc sp_desc;
+	sp_desc.bindPoint = RHIPipelineBindPoint::kGraphics;
+	sp_desc.colorAttachmentCount = 1;
+	sp_desc.colorAttachments = &color_att_ref;
+	sp_desc.depthStencilAttachmentCount = 0;
+	sp_desc.depthStencilAttachments = nullptr;
+	sp_desc.inputAttachmentCount = 0;
+	sp_desc.inputAttachments = nullptr;
+	sp_desc.preserveAttachmentCount = 0;
+	sp_desc.preserveAttachments = nullptr;
+
+	RHISubpassDependency sp_dep0;
+	sp_dep0.srcSubpass = kSubpassExternal;
+	sp_dep0.dstSubpass = 0;
+	sp_dep0.srcStageMask = RHIPipelineStageFlags::kBottomOfPipe;
+	sp_dep0.dstStageMask = RHIPipelineStageFlags::kColorAttachmentOutput;
+	sp_dep0.srcAccessMask = RHIAccessFlags::kMemoryRead;
+	sp_dep0.dstAccessMask = RHIAccessFlags::kColorAttachmentWrite;
+	sp_dep0.dependencyFlags = (uint32_t)RHIDependencyFlags::kByRegion;
+
+	RHISubpassDependency sp_dep1;
+	sp_dep1.srcSubpass = 0;
+	sp_dep1.dstSubpass = kSubpassExternal;
+	sp_dep1.srcStageMask = RHIPipelineStageFlags::kColorAttachmentOutput;
+	sp_dep1.dstStageMask = RHIPipelineStageFlags::kBottomOfPipe;
+	sp_dep1.srcAccessMask = RHIAccessFlags::kColorAttachmentWrite;
+	sp_dep1.dstAccessMask = RHIAccessFlags::kMemoryRead;
+	sp_dep1.dependencyFlags = (uint32_t)RHIDependencyFlags::kByRegion;
+
+	RHISubpassDependency sp_deps[] = { sp_dep0, sp_dep1 };
+
+	RHIRenderPassDesc rp_desc;
+	rp_desc.attachmentCount = 1;
+	rp_desc.attachmentDesc = &att_desc;
+	rp_desc.subpassCount = 1;
+	rp_desc.subpassDesc = &sp_desc;
+	rp_desc.dependencyCount = countof(sp_deps);
+	rp_desc.dependencies = sp_deps;
+
+	g_main_pass = device->CreateRenderPass(&rp_desc);
+
+	g_main_fb.resize(device->GetSwapChainSize());
+	for (size_t i = 0; i < g_main_fb.size(); ++i) {
+		IRHIImageView *view = device->GetSwapChainImageView(i);
+		const IRHIImage *image = device->GetSwapChainImage(i);
+
+		RHIFrameBufferDesc fb_desc;
+		fb_desc.attachmentCount = 1;
+		fb_desc.pAttachments = &view;
+		fb_desc.width_ = image->Width();
+		fb_desc.height_ = image->Height();
+		fb_desc.layers_ = 1;
+		g_main_fb[i] = device->CreateFrameBuffer(&fb_desc, g_main_pass);
+	}
+
+	size_t vs_size;
+	const uint32_t *vs =
+		(uint32_t *)filesystem::loadfile("vulkandrv/spir-v.vert.spv.bin", &vs_size);
+	size_t ps_size;
+	const uint32_t *ps =
+		(uint32_t *)filesystem::loadfile("vulkandrv/spir-v.frag.spv.bin", &ps_size);
+	RHIShaderStage tri_shader_stage[2];
+	tri_shader_stage[0].module = device->CreateShader(RHIShaderStageFlags::kVertex, vs, vs_size);
+	tri_shader_stage[0].pEntryPointName = "main";
+	tri_shader_stage[0].stage = RHIShaderStageFlags::kVertex;
+	tri_shader_stage[1].module = device->CreateShader(RHIShaderStageFlags::kFragment, ps, ps_size);
+	tri_shader_stage[1].pEntryPointName = "main";
+	tri_shader_stage[1].stage = RHIShaderStageFlags::kFragment;
+
+	vs = (uint32_t *)filesystem::loadfile("vulkandrv/spir-v-model.vert.spv.bin",
+										  &vs_size);
+	ps = (uint32_t *)filesystem::loadfile("vulkandrv/spir-v-model.frag.spv.bin",
+										  &ps_size);
+	RHIShaderStage quad_shader_stage[2];
+	quad_shader_stage[0].module = device->CreateShader(RHIShaderStageFlags::kVertex, vs, vs_size);
+	quad_shader_stage[0].pEntryPointName = "main";
+	quad_shader_stage[0].stage = RHIShaderStageFlags::kVertex;
+	quad_shader_stage[1].module = device->CreateShader(RHIShaderStageFlags::kFragment, ps, ps_size);
+	quad_shader_stage[1].pEntryPointName = "main";
+	quad_shader_stage[1].stage = RHIShaderStageFlags::kFragment;
+
+
+	RHIVertexInputState tri_vi_state;
+	tri_vi_state.vertexBindingDescCount = 0;
+	tri_vi_state.pVertexBindingDesc = nullptr;
+	tri_vi_state.vertexAttributeDescCount = 0;
+	tri_vi_state.pVertexAttributeDesc = nullptr;
+
+	RHIVertexInputState quad_vi_state;
+	quad_vi_state.vertexBindingDescCount = countof(vert_bindings_desc);
+	quad_vi_state.pVertexBindingDesc = vert_bindings_desc;
+	quad_vi_state.vertexAttributeDescCount = countof(va_desc);
+	quad_vi_state.pVertexAttributeDesc = va_desc;
+
+	RHIInputAssemblyState tri_ia_state;
+	tri_ia_state.primitiveRestartEnable = false;
+	tri_ia_state.topology = RHIPrimitiveTopology::kTriangleList;
+
+	RHIInputAssemblyState quad_ia_state;
+	quad_ia_state.primitiveRestartEnable = false;
+	quad_ia_state.topology = RHIPrimitiveTopology::kTriangleStrip;
+
+	RHIScissor scissors;
+	scissors.x = 0;
+	scissors.y = 0;
+	scissors.width = (uint32_t)NewX;
+	scissors.height = (uint32_t)NewY;
+
+	RHIViewport viewport;
+	viewport.x = viewport.y = 0;
+	viewport.width = (uint32_t)NewX;
+	viewport.height = (uint32_t)NewY;
+	viewport.minDepth = 0.0f;
+	viewport.maxDepth = 1.0f;
+
+	RHIViewportState viewport_state;
+	viewport_state.pScissors = &scissors;
+	viewport_state.pViewports = &viewport;
+	viewport_state.scissorCount = 1;
+	viewport_state.viewportCount = 1;
+
+	RHIRasterizationState raster_state;
+	raster_state.depthClampEnable = false;
+	raster_state.cullMode = RHICullModeFlags::kBack;
+	raster_state.depthBiasClamp = 0.0f;
+	raster_state.depthBiasConstantFactor = 0.0f;
+	raster_state.depthBiasEnable = false;
+	raster_state.depthBiasSlopeFactor = 0.0f;
+	raster_state.frontFace = RHIFrontFace::kCounterClockwise;
+	raster_state.lineWidth = 1.0f;
+	raster_state.polygonMode = RHIPolygonMode::kFill;
+	raster_state.rasterizerDiscardEnable = false;
+
+	RHIMultisampleState ms_state;
+	ms_state.alphaToCoverageEnable = false;
+	ms_state.alphaToOneEnable = false;
+	ms_state.minSampleShading = 0.0f;
+	ms_state.pSampleMask = nullptr;
+	ms_state.rasterizationSamples = 1;
+	ms_state.sampleShadingEnable = false;
+
+	RHIColorBlendAttachmentState blend_att_state;
+	blend_att_state.alphaBlendOp = RHIBlendOp::kAdd;
+	blend_att_state.colorBlendOp = RHIBlendOp::kAdd;
+	blend_att_state.blendEnable = false;
+	blend_att_state.colorWriteMask =
+		(uint32_t)RHIColorComponentFlags::kR | (uint32_t)RHIColorComponentFlags::kG |
+		(uint32_t)RHIColorComponentFlags::kB | (uint32_t)RHIColorComponentFlags::kA;
+	blend_att_state.srcColorBlendFactor = RHIBlendFactor::One;
+	blend_att_state.dstColorBlendFactor = RHIBlendFactor::Zero;
+	blend_att_state.srcAlphaBlendFactor = RHIBlendFactor::One;
+	blend_att_state.dstAlphaBlendFactor = RHIBlendFactor::Zero;
+
+	RHIColorBlendState blend_state = {false, RHILogicOp::kCopy, 1, &blend_att_state, {0, 0, 0, 0}};
+
+	IRHIPipelineLayout *pipeline_layout = device->CreatePipelineLayout(nullptr);
+
+	g_tri_pipeline = device->CreateGraphicsPipeline(
+		&tri_shader_stage[0], countof(tri_shader_stage), &tri_vi_state, &tri_ia_state,
+		&viewport_state, &raster_state, &ms_state, &blend_state, pipeline_layout, g_main_pass);
+
+	g_quad_pipeline = device->CreateGraphicsPipeline(
+		&quad_shader_stage[0], countof(quad_shader_stage), &quad_vi_state, &quad_ia_state,
+		&viewport_state, &raster_state, &ms_state, &blend_state, pipeline_layout, g_main_pass);
+
+	if (!UVulkanRenderDevice::SetRes(NewX, NewY, NewColorBytes, Fullscreen)) {
 		GError->Log(L"Init: SetRes failed.");
 		return 0;
 	}
@@ -364,6 +589,7 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 
 	IRHIImage* fb_image = dev->GetCurrentSwapChainImage();
 	IRHICmdBuf* cb = g_cmdbuf[g_curCBIdx];
+	IRHIFrameBuffer *cur_fb = g_main_fb[g_curFBIdx];
 
 	cb->Begin();
 
@@ -372,11 +598,45 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 	static vec4 color = vec4(1, 0, 0, 0);
 	color.x = 0.5f*sin(2 * 3.1415f*sec) + 0.5f;
 
-	cb->Barrier_PresentToClear(fb_image);
-	cb->Clear(fb_image, color, (uint32_t)RHIImageAspectFlags::kColor);
-	cb->Barrier_ClearToPresent(fb_image);
+	bool bClearScreen = false;
+	if (bClearScreen)
+	{
+		cb->Barrier_PresentToClear(fb_image);
+		cb->Clear(fb_image, color, (uint32_t)RHIImageAspectFlags::kColor);
+		cb->Barrier_ClearToPresent(fb_image);
+	}
+	else
+	{
+		if (!g_quad_vb_copy_event->IsSet(dev)) {
+			static bool once = true;
+			assert(once);
+			cb->CopyBuffer(g_quad_gpu_vb, 0, g_quad_staging_vb, 0, g_quad_staging_vb->Size());
+			cb->BufferBarrier(
+				g_quad_gpu_vb, RHIAccessFlags::kTransferWrite, RHIPipelineStageFlags::kTransfer,
+				RHIAccessFlags::kVertexAttributeRead, RHIPipelineStageFlags::kVertexInput);
+			cb->SetEvent(g_quad_vb_copy_event, RHIPipelineStageFlags::kVertexInput);
+			once = !once;
+		}
 
-	// draw nice images
+		ivec4 render_area(0, 0, fb_image->Width(), fb_image->Height());
+		RHIClearValue clear_value = { vec4(0,1,0, 0), 0.0f, 0 };
+		cb->BeginRenderPass(g_main_pass, cur_fb, &render_area, &clear_value, 1);
+
+		cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_tri_pipeline);
+		cb->Draw(3, 1, 0, 0);
+
+		// I think there is no need to wait as we schedule draw in the queue and all operations are sequential there
+		// only necessary if we want to do something on a host, but let it be here as an example
+		if (g_quad_vb_copy_event->IsSet(dev)) {
+			cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_quad_pipeline);
+			cb->BindVertexBuffers(&g_quad_gpu_vb, 0, 1);
+			cb->Draw(4, 1, 0, 0);
+		}
+		else {
+			log_debug("Waiting for copy to finish\n");
+		}
+		cb->EndRenderPass(g_main_pass, cur_fb);
+	}
 
 
 	cb->End();
@@ -404,6 +664,7 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 	}
 
 	g_curCBIdx = (g_curCBIdx  + 1) % ((int)dev->GetNumBufferedFrames());
+	g_curFBIdx = (g_curFBIdx  + 1) % ((int)g_main_fb.size());
 
 	sanity_lock_cnt--;
 }
@@ -494,4 +755,30 @@ void UVulkanRenderDevice::PreDrawGouraud(FSceneNode *Frame, FLOAT FogDistance, F
 void UVulkanRenderDevice::PostDrawGouraud(FLOAT FogDistance)
 {
 }
-#endif
+#endif 
+
+void UVulkanRenderDevice::OnSwapChainRecreated(void* user_ptr) {
+	UVulkanRenderDevice* vrd = (UVulkanRenderDevice*)(user_ptr);
+	(void)vrd;
+	IRHIDevice* dev = g_vulkan_device;
+
+	log_info("recreating frame buffers, because swap chain was recreated\n");
+	for (size_t i = 0; i < g_main_fb.size(); ++i) {
+		g_main_fb[i]->Destroy(dev);
+		g_main_fb[i] = nullptr;
+	}
+
+	for (size_t i = 0; i < g_main_fb.size(); ++i) {
+		IRHIImageView *view = dev->GetSwapChainImageView(i);
+		const IRHIImage *image = dev->GetSwapChainImage(i);
+
+		RHIFrameBufferDesc fb_desc;
+		fb_desc.attachmentCount = 1;
+		fb_desc.pAttachments = &view;
+		fb_desc.width_ = image->Width();
+		fb_desc.height_ = image->Height();
+		fb_desc.layers_ = 1;
+		g_main_fb[i] = dev->CreateFrameBuffer(&fb_desc, g_main_pass);
+	}
+
+}
