@@ -24,6 +24,7 @@ template<> struct ResImplType<IRHIDevice> { typedef RHIDeviceVk Type; };
 template<> struct ResImplType<IRHICmdBuf> { typedef RHICmdBufVk Type; };
 template<> struct ResImplType<IRHIImage> { typedef RHIImageVk Type; };
 template<> struct ResImplType<IRHIImageView> { typedef RHIImageViewVk Type; };
+template<> struct ResImplType<IRHISampler> { typedef RHISamplerVk Type; };
 template<> struct ResImplType<IRHIRenderPass> { typedef RHIRenderPassVk Type; };
 template<> struct ResImplType<IRHIFrameBuffer> { typedef RHIFrameBufferVk Type; };
 template<> struct ResImplType<IRHIGraphicsPipeline> { typedef RHIGraphicsPipelineVk Type; };
@@ -186,6 +187,66 @@ VkImageLayout translate_il(RHIImageLayout layout) {
 	return layout;
 }
 #endif
+
+VkImageTiling translate(RHIImageTiling::Value tiling) {
+	VkImageTiling tiling_arr[] = {
+	VK_IMAGE_TILING_OPTIMAL,
+	VK_IMAGE_TILING_LINEAR,
+	VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT,
+	};
+	assert((uint32_t)tiling < countof(tiling_arr));
+	return tiling_arr[(uint32_t)tiling];
+};
+
+VkImageTiling translate_it(RHIImageTiling::Value tiling) {
+	return translate(tiling);
+}
+
+VkImageType translate(RHIImageType::Value type) {
+	VkImageType types[] = {
+    VK_IMAGE_TYPE_1D,
+    VK_IMAGE_TYPE_2D,
+    VK_IMAGE_TYPE_3D,
+	};
+	assert((uint32_t)type < countof(types));
+	return types[(uint32_t)type];
+};
+
+VkImageType translate_itype(RHIImageType::Value type) {
+	return translate(type);
+}
+
+VkSampleCountFlagBits translate(RHISampleCount::Value samples) {
+	VkSampleCountFlagBits samples_arr[] = {
+    VK_SAMPLE_COUNT_1_BIT,
+    VK_SAMPLE_COUNT_2_BIT,
+    VK_SAMPLE_COUNT_4_BIT,
+    VK_SAMPLE_COUNT_8_BIT,
+    VK_SAMPLE_COUNT_16_BIT,
+    VK_SAMPLE_COUNT_32_BIT,
+    VK_SAMPLE_COUNT_64_BIT,
+	};
+	assert((uint32_t)samples< countof(samples_arr));
+	return samples_arr[(uint32_t)samples];
+};
+
+VkSampleCountFlagBits translate_sc(RHISampleCount::Value type) {
+	return translate(type);
+}
+
+
+VkImageUsageFlags  translate_image_usage_flags(uint32_t image_usage_flags) {
+	VkImageUsageFlags  f = 0;
+	f = (image_usage_flags & RHIImageUsageFlagBits::TransferSrcBit) ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0;
+	f = (image_usage_flags & RHIImageUsageFlagBits::TransferDstBit) ? VK_IMAGE_USAGE_TRANSFER_DST_BIT : 0;
+	f = (image_usage_flags & RHIImageUsageFlagBits::SampledBit) ? VK_IMAGE_USAGE_SAMPLED_BIT : 0;
+	f = (image_usage_flags & RHIImageUsageFlagBits::StorageBit) ? VK_IMAGE_USAGE_STORAGE_BIT : 0;
+	f = (image_usage_flags & RHIImageUsageFlagBits::ColorAttachmentBit) ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0;
+	f = (image_usage_flags & RHIImageUsageFlagBits::DepthStencilAttachmentBit) ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : 0;
+	f = (image_usage_flags & RHIImageUsageFlagBits::TransientAttachmentBit) ? VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT : 0;
+	f = (image_usage_flags & RHIImageUsageFlagBits::InputAttachmentBit) ? VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT : 0;
+	return f;
+}
 
 #if defined(USE_PipelineStageFlags_TRANSLATION)
 VkPipelineStageFlags translate(RHIPipelineStageFlags::Value pipeline_stage) {
@@ -477,16 +538,102 @@ VkSharingMode translate_sharing_mode(RHISharingMode::Value sharing_mode) {
     return sharing_mode == RHISharingMode::kConcurrent ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
 }
 
-VkMemoryPropertyFlags translate_mem_prop(uint32_t memprop) {
-    VkMemoryPropertyFlags vk_flags = (memprop & RHIMemoryPropertyFlags::kDeviceLocal) ? VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT : 0;
-    vk_flags |= (memprop & RHIMemoryPropertyFlags::kHostVisible) ? VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT: 0;
-    vk_flags |= (memprop & RHIMemoryPropertyFlags::kHostCoherent) ? VK_MEMORY_PROPERTY_HOST_COHERENT_BIT : 0;
-    vk_flags |= (memprop & RHIMemoryPropertyFlags::kHostCached) ? VK_MEMORY_PROPERTY_HOST_CACHED_BIT : 0;
-    vk_flags |= (memprop & RHIMemoryPropertyFlags::kLazilyAllocated) ? VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT: 0;
-    vk_flags |= (memprop & RHIMemoryPropertyFlags::kProtectedBit) ? VK_MEMORY_PROPERTY_PROTECTED_BIT : 0;
-    vk_flags |= (memprop & RHIMemoryPropertyFlags::kDeviceCoherentAMD) ? VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD : 0;
-    vk_flags |= (memprop & RHIMemoryPropertyFlags::kDeviceUncachedAMD) ? VK_MEMORY_PROPERTY_DEVICE_UNCACHED_BIT_AMD : 0;
+RHISharingMode::Value untranslate_sharing_mode(VkSharingMode sharing_mode) {
+	return sharing_mode == VK_SHARING_MODE_CONCURRENT ? RHISharingMode::kConcurrent : RHISharingMode::kExclusive;
+}
+
+VkMemoryPropertyFlags translate_mem_prop(RHIMemoryPropertyFlags memprop) {
+    VkMemoryPropertyFlags vk_flags = (memprop & RHIMemoryPropertyFlagBits::kDeviceLocal) ? VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT : 0;
+    vk_flags |= (memprop & RHIMemoryPropertyFlagBits::kHostVisible) ? VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT: 0;
+    vk_flags |= (memprop & RHIMemoryPropertyFlagBits::kHostCoherent) ? VK_MEMORY_PROPERTY_HOST_COHERENT_BIT : 0;
+    vk_flags |= (memprop & RHIMemoryPropertyFlagBits::kHostCached) ? VK_MEMORY_PROPERTY_HOST_CACHED_BIT : 0;
+    vk_flags |= (memprop & RHIMemoryPropertyFlagBits::kLazilyAllocated) ? VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT: 0;
+    vk_flags |= (memprop & RHIMemoryPropertyFlagBits::kProtectedBit) ? VK_MEMORY_PROPERTY_PROTECTED_BIT : 0;
+    vk_flags |= (memprop & RHIMemoryPropertyFlagBits::kDeviceCoherentAMD) ? VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD : 0;
+    vk_flags |= (memprop & RHIMemoryPropertyFlagBits::kDeviceUncachedAMD) ? VK_MEMORY_PROPERTY_DEVICE_UNCACHED_BIT_AMD : 0;
     return vk_flags;
+}
+
+VkFilter translate_filter(RHIFilter::Value filter) {
+	switch (filter) {
+	case RHIFilter::kNearest: return VK_FILTER_NEAREST;
+	case RHIFilter::kLinear: return VK_FILTER_LINEAR;
+	default:
+		assert(0 && "Invalid filter!");
+		return VK_FILTER_MAX_ENUM;
+	}
+}
+VkSamplerMipmapMode translate_sampler_mipmap_mode(RHISamplerMipmapMode::Value mipmap_mode) {
+	switch (mipmap_mode) {
+	case RHISamplerMipmapMode::kNearest: return VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	case RHISamplerMipmapMode::kLinear: return VK_SAMPLER_MIPMAP_MODE_LINEAR;
+	default:
+		assert(0 && "Invalid mipmap mode!");
+		return VK_SAMPLER_MIPMAP_MODE_MAX_ENUM;
+	}
+}
+
+VkSamplerAddressMode translate_sampler_address_mode(RHISamplerAddressMode::Value address_mode) {
+	switch (address_mode) {
+	case RHISamplerAddressMode::kRepeat: return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	case RHISamplerAddressMode::kMirroredRepeat: return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+	case RHISamplerAddressMode::kClampToEdge: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	case RHISamplerAddressMode::kClampToBorder: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+	case RHISamplerAddressMode::kMirrorClampToEdge: return VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE;
+	default:
+		assert(0 && "Invalid mipmap mode!");
+		return VK_SAMPLER_ADDRESS_MODE_MAX_ENUM;
+	}
+}
+
+VkCompareOp translate_compare_op(RHICompareOp::Value compare_op) {
+	switch(compare_op) {
+	case RHICompareOp::kNever: return VK_COMPARE_OP_NEVER;
+	case RHICompareOp::kLess: return VK_COMPARE_OP_LESS;
+	case RHICompareOp::kEqual: return VK_COMPARE_OP_EQUAL;
+	case RHICompareOp::kLessOrEqual: return VK_COMPARE_OP_LESS_OR_EQUAL;
+	case RHICompareOp::kGreater: return VK_COMPARE_OP_GREATER;
+	case RHICompareOp::kNotEqual: return VK_COMPARE_OP_NOT_EQUAL;
+	case RHICompareOp::kGreaterOrEqual: return VK_COMPARE_OP_GREATER_OR_EQUAL;
+	case RHICompareOp::kAlways: return VK_COMPARE_OP_ALWAYS;
+	default:
+		assert(0 && "Invalid mipmap mode!");
+		return VK_COMPARE_OP_MAX_ENUM;
+	}
+}
+
+//////////////////////// Common functions ////////////////////////////////////////////////////////
+VkDeviceMemory allocate_memory(const VulkanDevice& device, const VkMemoryRequirements &mem_req,
+							   const VkMemoryPropertyFlags& mem_prop) {
+
+	VkPhysicalDevice phys_dev = device.phys_device_;
+	VkDevice dev = device.device_;
+
+	VkPhysicalDeviceMemoryProperties memory_properties;
+	vkGetPhysicalDeviceMemoryProperties(phys_dev, &memory_properties);
+
+	VkDeviceMemory vk_mem = VK_NULL_HANDLE;
+	for (uint32_t i = 0; i < memory_properties.memoryTypeCount; ++i) {
+		if ((mem_req.memoryTypeBits & (1 << i)) &&
+			(memory_properties.memoryTypes[i].propertyFlags & mem_prop)) {
+
+			VkMemoryAllocateInfo mem_alloc_info = {
+				VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, // VkStructureType sType
+				nullptr,	  // const void                            *pNext
+				mem_req.size, // VkDeviceSize allocationSize
+				i			  // uint32_t                               memoryTypeIndex
+			};
+
+			if (vkAllocateMemory(dev, &mem_alloc_info, device.pallocator_, &vk_mem) ==
+				VK_SUCCESS) {
+				break;
+			} else {
+				log_error("allocate_memory: failed to allocate memory, looking for another memory type\n");
+			}
+		}
+	}
+	assert(vk_mem);
+	return vk_mem;
 }
 
 ////////////// Image //////////////////////////////////////////////////
@@ -494,6 +641,7 @@ VkMemoryPropertyFlags translate_mem_prop(uint32_t memprop) {
 void RHIImageVk::Destroy(IRHIDevice* device) {
 	RHIDeviceVk* dev = ResourceCast(device);
 	vkDestroyImage(dev->Handle(), handle_, dev->Allocator());
+	// TODO: should we destroy image memory?
 }
 
 //void RHIImageVk::SetImage(const rhi_vulkan::Image& image) {
@@ -507,6 +655,11 @@ void RHIImageViewVk::Destroy(IRHIDevice* device) {
 	vkDestroyImageView(dev->Handle(), handle_, dev->Allocator());
 }
 
+////////////// Sampler //////////////////////////////////////////////////
+void RHISamplerVk::Destroy(IRHIDevice* device) {
+	RHIDeviceVk* dev = ResourceCast(device);
+	vkDestroySampler(dev->Handle(), handle_, dev->Allocator());
+}
 
 ////////////// Frame Buffer //////////////////////////////////////////////////
 
@@ -1387,7 +1540,52 @@ IRHIFrameBuffer* RHIDeviceVk::CreateFrameBuffer(RHIFrameBufferDesc* desc, const 
 	return new RHIFrameBufferVk(fb, img_views_arr);
 }
 
-IRHIImageView* RHIDeviceVk::CreateImageView(const RHIImageViewDesc* desc) {
+IRHIImage *RHIDeviceVk::CreateImage(const RHIImageDesc *desc, RHIImageLayout::Value initial_layout, RHIMemoryPropertyFlags mem_prop) {
+
+	VkImageCreateInfo ci{};
+	ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	ci.pNext = nullptr;
+	ci.flags = 0;
+	ci.imageType = translate_itype(desc->type);
+	ci.format = translate_f(desc->format);
+	ci.extent = { desc->width, desc->height, desc->depth };
+	ci.mipLevels = desc->numMips;
+	ci.arrayLayers = desc->arraySize;
+	// TODO: check form multisampling support capabilities?
+	ci.samples = translate_sc(desc->numSamples);
+	ci.tiling = translate_it(desc->tiling);
+	ci.usage = translate_image_usage_flags(desc->usage);
+	ci.sharingMode = translate_sharing_mode(desc->sharingMode);
+
+	assert(desc->sharingMode == RHISharingMode::kExclusive);
+		
+	ci.queueFamilyIndexCount = 0;
+	ci.pQueueFamilyIndices = nullptr;
+
+	ci.initialLayout = translate_il(initial_layout);
+
+	VkImage vk_image;
+	if(vkCreateImage(dev_.device_, &ci, dev_.pallocator_, &vk_image) != VK_SUCCESS) {
+		log_error("vkCreateImageView: failed to create image views!\n");
+		return nullptr;
+	}
+
+	VkMemoryRequirements image_mem_req;
+	vkGetImageMemoryRequirements(dev_.device_, vk_image, &image_mem_req);
+
+	VkMemoryPropertyFlags vk_mem_prop = translate_mem_prop(mem_prop);
+	VkDeviceMemory mem = allocate_memory(dev_, image_mem_req, vk_mem_prop);
+
+	if (vkBindImageMemory(dev_.device_, vk_image, mem, 0) != VK_SUCCESS) {
+		log_error("CreateImage: Could not bind memory to an image!\n");
+		return false;
+	}
+
+	RHIImageVk* image = new RHIImageVk(vk_image, *desc, vk_mem_prop, ci.initialLayout);
+	return image;
+}
+
+IRHIImageView *RHIDeviceVk::CreateImageView(const RHIImageViewDesc *desc) {
 	assert(desc);
 	RHIImageVk* image = ResourceCast(desc->image);
 
@@ -1412,6 +1610,36 @@ IRHIImageView* RHIDeviceVk::CreateImageView(const RHIImageViewDesc* desc) {
 		return nullptr;
 	}
 	return new RHIImageViewVk(image_view, image);
+}
+
+IRHISampler *RHIDeviceVk::CreateSampler(const RHISamplerDesc *desc) {
+	VkSamplerCreateInfo ci{};
+	ci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+	ci.pNext = nullptr;
+	ci.flags = 0;
+	ci.magFilter = translate_filter(desc->magFilter);
+	ci.minFilter = translate_filter(desc->minFilter);
+	ci.mipmapMode = translate_sampler_mipmap_mode(desc->mipmapMode);
+	ci.addressModeU = translate_sampler_address_mode(desc->addressModeU);
+	ci.addressModeV = translate_sampler_address_mode(desc->addressModeV);
+	ci.addressModeW = translate_sampler_address_mode(desc->addressModeW);
+	ci.mipLodBias = 0.0f;
+	ci.anisotropyEnable = VK_FALSE;
+	ci.maxAnisotropy = 1.0f;
+	ci.compareEnable = desc->compareEnable;
+	ci.compareOp = translate_compare_op(desc->compareOp);
+	ci.minLod = 0.0f;
+	ci.maxLod = 0.0f;
+	ci.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+	ci.unnormalizedCoordinates = desc->unnormalizedCoordinates;
+
+	VkSampler sampler;
+	if (vkCreateSampler(dev_.device_, &ci, dev_.pallocator_, &sampler) != VK_SUCCESS) {
+		log_error("vkCreateSampler: failed to create sampler!\n");
+		return nullptr;
+	}
+
+	return new RHISamplerVk(sampler, *desc);
 }
 
 IRHIGraphicsPipeline *RHIDeviceVk::CreateGraphicsPipeline(

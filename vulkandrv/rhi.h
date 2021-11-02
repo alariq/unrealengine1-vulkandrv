@@ -12,6 +12,8 @@ class IRHIRenderPass;
 class IRHIFrameBuffer;
 class IRHIEvent;
 
+typedef uint32_t RHIFlags;
+
 typedef void(*fpOnSwapChainRecreated)(void* user_ptr);
 
 //#if defined(USE_QueueType_TRANSLATION)
@@ -156,6 +158,69 @@ struct RHIImageLayout { enum Value: uint32_t {
 #define RHIImageLayout VkImageLayout 
 #endif
 
+struct RHIImageTiling { enum Value : uint32_t {
+        kOptimal = 0,
+        kLinear = 1,
+        kDrmFormatModifierExt = 2,
+    };
+};
+
+struct RHIImageType { enum Value : uint32_t {
+        k1D = 0,
+        k2D = 1,
+        k3D = 2
+    };
+};
+
+struct RHIImageUsageFlagBits { enum Value : uint32_t {
+        TransferSrcBit = 0x01,
+        TransferDstBit = 0x02,
+        SampledBit = 0x04,
+        StorageBit = 0x08,
+        ColorAttachmentBit = 0x10,
+        DepthStencilAttachmentBit = 0x20,
+        TransientAttachmentBit = 0x40,
+        InputAttachmentBit = 0x80,
+    };
+};
+
+typedef RHIFlags RHIImageUsageFlags;
+
+struct RHIFilter { enum Value : uint32_t {
+        kNearest = 0,
+        kLinear = 1,
+        kMaxEnum = 0x7fffffff
+    };
+};
+
+struct RHISamplerMipmapMode { enum Value : uint32_t {
+        kNearest = 0,
+        kLinear = 1,
+        kMaxEnum = 0x7fffffff
+    };
+};
+
+struct RHISamplerAddressMode { enum Value: uint32_t {
+    kRepeat = 0,
+    kMirroredRepeat = 1,
+    kClampToEdge = 2,
+    kClampToBorder = 3,
+    kMirrorClampToEdge = 4,
+    kMaxEnum = 0x7fffffff
+};
+};
+
+struct RHISampleCount { enum Value : uint32_t {
+        k1Bit = 0,
+        k2Bit = 1,
+        k4Bit = 2,
+        k8Bit = 3,
+        k16Bit = 4,
+        k32Bit = 5,
+        k64Bit = 6,
+    };
+};
+
 struct RHIAttachmentStoreOp { enum Value: uint32_t {
 		kStore = 0,
 		kDoNotCare = 1,
@@ -231,7 +296,7 @@ struct RHIFrontFace { enum Value: uint32_t {
 };
 };
 
-struct RHICompareOp { enum: uint32_t {
+struct RHICompareOp { enum Value: uint32_t {
 	kNever = 0,
 	kLess = 1,
 	kEqual = 2,
@@ -319,7 +384,7 @@ struct RHIBufferUsageFlags { enum: uint32_t {
 };
 
 // flags really should not be class
-struct RHIMemoryPropertyFlags { enum: uint32_t {
+struct RHIMemoryPropertyFlagBits { enum: uint32_t {
     kDeviceLocal = 0x00000001,
     kHostVisible = 0x00000002,
     kHostCoherent = 0x00000004,
@@ -330,6 +395,8 @@ struct RHIMemoryPropertyFlags { enum: uint32_t {
     kDeviceUncachedAMD = 0x00000080,
 };
 };
+
+typedef RHIFlags RHIMemoryPropertyFlags;
 
 struct RHISharingMode { enum Value: uint32_t {
     kExclusive = 0,
@@ -358,6 +425,42 @@ struct RHIImageViewDesc {
     //RHIComponentMapping         components;
     RHIImageSubresourceRange    subresourceRange;
 };
+
+////////////////////////////////////////////////////////////////////////////////
+struct RHIImageDesc {
+    RHIImageType::Value type;
+    RHIFormat format;
+    uint32_t width;
+    uint32_t height;
+    uint32_t depth;
+    uint32_t arraySize;
+    uint32_t numMips;
+    RHISampleCount::Value numSamples;
+    RHIImageTiling::Value tiling;
+    RHIImageUsageFlags usage;
+    RHISharingMode::Value sharingMode;
+};
+
+////////////////////////////////////////////////////////////////////////////////
+struct RHISamplerDesc {
+	RHIFilter::Value magFilter;
+	RHIFilter::Value minFilter;
+	RHISamplerMipmapMode::Value mipmapMode;
+	RHISamplerAddressMode::Value addressModeU;
+	RHISamplerAddressMode::Value addressModeV;
+	RHISamplerAddressMode::Value addressModeW;
+	float mipLodBias;
+	bool anisotropyEnable;
+	float maxAnisotropy;
+	bool compareEnable;
+	RHICompareOp::Value compareOp;
+	float minLod;
+	float maxLod;
+	// do not care for now
+	// RHIBorderColor           borderColor;
+	bool unnormalizedCoordinates;
+};
+
 
 ////////////////////////////////////////////////////////////////////////////////
 struct RHIFrameBufferDesc {
@@ -546,22 +649,22 @@ struct RHIClearValue {
 
 class IRHIImage {
 protected:
-	RHIFormat format_;
-	uint32_t width_;
-	uint32_t height_;
+    RHIImageDesc desc_;
 public:
-	RHIFormat Format() const { return format_; }
-	uint32_t Width() const { return width_; }
-	uint32_t Height() const { return height_; }
+    IRHIImage(const RHIImageDesc& desc) : desc_(desc) {}
+    const RHIImageDesc& GetDesc() const {
+        return desc_;
+    }
+	uint32_t Width() const { return desc_.width; }
+	uint32_t Height() const { return desc_.height; }
 
+    virtual ~IRHIImage() = 0;
 };
 
 class IRHIImageView {
 protected:
-	IRHIImage* image_;
 public:
-    const IRHIImage* GetImage() const { assert(image_); return image_; }
-    IRHIImage* GetImage() { assert(image_); return image_; }
+    virtual ~IRHIImageView() = 0;
 };
 
 //
@@ -622,6 +725,11 @@ public:
 	virtual ~IRHIShader() = 0;
 };
 
+class IRHISampler {
+public:
+    virtual ~IRHISampler() = 0;
+};
+
 class IRHIDescriptorSetLayout {
 public:
 	virtual ~IRHIDescriptorSetLayout() = 0;
@@ -672,7 +780,9 @@ public:
 	virtual IRHICmdBuf*			CreateCommandBuffer(RHIQueueType::Value queue_type) = 0;
 	virtual IRHIRenderPass*		CreateRenderPass(const RHIRenderPassDesc* desc) = 0;
 	virtual IRHIFrameBuffer*	CreateFrameBuffer(RHIFrameBufferDesc* desc, const IRHIRenderPass* rp_in) = 0;
+	virtual IRHIImage*		    CreateImage(const RHIImageDesc* desc, RHIImageLayout::Value initial_layout, RHIMemoryPropertyFlags mem_prop) = 0;
 	virtual IRHIImageView*		CreateImageView(const RHIImageViewDesc* desc) = 0;
+    virtual IRHISampler*        CreateSampler(const RHISamplerDesc* desc) = 0;
 	virtual IRHIBuffer*		    CreateBuffer(uint32_t size, uint32_t usage, uint32_t memprop, RHISharingMode::Value sharing) = 0;
 
     virtual IRHIFence*          CreateFence(bool create_signalled) = 0;

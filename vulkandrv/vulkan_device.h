@@ -78,28 +78,21 @@ private:
 
 ////////////////////////////////////////////////////////////////////////////////
 class RHIImageVk: public IRHIImage {
-	//rhi_vulkan::Image image_;
-	// should those be native Vk* members only?
-	//RHIFormat format_;
 
-	VkFormat vk_format_;
-	VkImage handle_;// = VK_NULL_HANDLE;
-	~RHIImageVk();// = default;
+	VkImage handle_ = VK_NULL_HANDLE;
+	VkMemoryPropertyFlags mem_prop_flags_;
+	~RHIImageVk() = default;
 public:
-	VkAccessFlags vk_access_flags_;
+	//VkFormat vk_format_;
+	VkAccessFlags vk_access_flags_ = VK_ACCESS_FLAG_BITS_MAX_ENUM;
 	VkImageLayout vk_layout_;
 
-	void Destroy(IRHIDevice* device);
-	RHIImageVk(VkImage image, uint32_t width, uint32_t height) : handle_(image) {
-		width_ = width;
-		height_ = height;
-	}
-	//const Image& GetImage() const { return image_; }
-	//Image& GetImage() { return image_; }
-	//void SetImage(const Image& image);
+	void Destroy(IRHIDevice *device);
+	RHIImageVk(VkImage image, const RHIImageDesc &desc, VkMemoryPropertyFlags mem_prop_flags,
+			   VkImageLayout layout)
+		: IRHIImage(desc), handle_(image), mem_prop_flags_(mem_prop_flags), vk_layout_(layout) {} 
 	VkImage Handle() const { return handle_; }
-	VkFormat Format() const { return vk_format_; }
-
+	//VkFormat Format() const { return vk_format_; }
 };
 
 
@@ -107,13 +100,28 @@ public:
 class RHIImageViewVk: public IRHIImageView  {
 	VkImageView handle_;
 	RHIImageVk* image_;
-	~RHIImageViewVk();// = default;
+	~RHIImageViewVk() = default;
 
   public:
 	RHIImageViewVk(VkImageView iv, RHIImageVk *image) : handle_(iv) { image_ = image; }
+    const IRHIImage* GetImage() const { assert(image_); return image_; }
+    IRHIImage* GetImage() { assert(image_); return image_; }
 	void Destroy(IRHIDevice *);
 	VkImageView Handle() const { return handle_; }
 };
+
+////////////////////////////////////////////////////////////////////////////////
+class RHISamplerVk: public IRHISampler {
+	VkSampler handle_;
+	RHISamplerDesc desc_;
+	~RHISamplerVk() = default;
+
+  public:
+	RHISamplerVk(VkSampler sampler, const RHISamplerDesc &desc) : handle_(sampler), desc_(desc) {}
+	void Destroy(IRHIDevice *);
+	VkSampler Handle() const { return handle_; }
+};
+
 
 ////////////////////////////////////////////////////////////////////////////////
 class RHIShaderVk: public IRHIShader {
@@ -311,7 +319,9 @@ public:
 	virtual IRHICmdBuf* CreateCommandBuffer(RHIQueueType::Value queue_type) ;
 	virtual IRHIRenderPass* CreateRenderPass(const RHIRenderPassDesc* desc) ;
 	virtual IRHIFrameBuffer* CreateFrameBuffer(RHIFrameBufferDesc* desc, const IRHIRenderPass* rp_in) ;
+	virtual IRHIImage* CreateImage(const RHIImageDesc* desc, RHIImageLayout::Value initial_layout, RHIMemoryPropertyFlags mem_prop) ;
 	virtual IRHIImageView* CreateImageView(const RHIImageViewDesc* desc) ;
+	virtual IRHISampler *CreateSampler(const RHISamplerDesc *desc);
 	virtual IRHIBuffer* CreateBuffer(uint32_t size, uint32_t usage, uint32_t memprop, RHISharingMode::Value sharing) ;
 
     virtual IRHIFence* CreateFence(bool create_signalled) ;

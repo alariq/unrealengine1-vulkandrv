@@ -462,15 +462,20 @@ bool create_semaphore(VkDevice device, VkAllocationCallbacks* pallocator, VkSema
 	return true;
 }
 
+VkFormat translate_f(RHIFormat fmt);
+RHISharingMode::Value untranslate_sharing_mode(VkSharingMode sharing_mode);
+
 bool create_swap_chain(const SwapChainData& swap_chain_data, VkDevice device, VkSurfaceKHR surface,
 	const QueueFamilies& qfi, VkAllocationCallbacks* pallocator, SwapChain& swap_chain, VkSwapchainKHR old_swapchain) {
 
 	// select format 
 	VkSurfaceFormatKHR format = { VK_FORMAT_UNDEFINED, VK_COLOR_SPACE_MAX_ENUM_KHR };
+	const RHIFormat swap_chain_surface_fmt = RHIFormat::kB8G8R8A8_SRGB;
+	const VkFormat vk_swap_chain_surface_fmt = translate_f(swap_chain_surface_fmt);
 
 	for (int i = 0; i < (int)swap_chain_data.formats_.size(); ++i) {
 		const VkSurfaceFormatKHR& fmt = swap_chain_data.formats_[i];
-		if (fmt.format == VK_FORMAT_B8G8R8A8_SRGB && fmt.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+		if (fmt.format == vk_swap_chain_surface_fmt && fmt.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
 			format = fmt;
 			break;
 		}
@@ -510,9 +515,11 @@ bool create_swap_chain(const SwapChainData& swap_chain_data, VkDevice device, Vk
 	// +1 to avoid waiting for a driver 
 	uint32_t image_count = min(swap_chain_data.capabilities_.minImageCount + 1, maxImgCount);
 
+	RHIImageUsageFlags rhi_usage = RHIImageUsageFlagBits::ColorAttachmentBit;
 	VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 	if (swap_chain_data.capabilities_.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) {
 		usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+		rhi_usage = RHIImageUsageFlagBits::TransferDstBit;
 	}
 
 	VkSwapchainCreateInfoKHR create_info = {};
@@ -582,12 +589,29 @@ bool create_swap_chain(const SwapChainData& swap_chain_data, VkDevice device, Vk
 			log_error("vkCreateImageView: failed to create image views!\n");
 			return false;
 		}
-		RHIImageVk* image = new RHIImageVk(img, extent.width, extent.height);
-		swap_chain.images_[idx] = image;
 		// swap chain images are created with this initial layout
-		swap_chain.images_[idx]->vk_layout_ = VK_IMAGE_LAYOUT_UNDEFINED;//  VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-		swap_chain.images_[idx]->vk_access_flags_ = VK_ACCESS_MEMORY_READ_BIT;
+		VkImageLayout vk_layout = VK_IMAGE_LAYOUT_UNDEFINED;//  VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
+		// TODO: copy correct flags from swap chain create info
+		RHIImageDesc image_desc;
+		image_desc.width = extent.width;
+		image_desc.height = extent.height;
+		image_desc.depth = 1;
+		image_desc.arraySize = 1;
+		image_desc.format = swap_chain_surface_fmt;
+		image_desc.numMips = 1;
+		image_desc.numMips = 1;
+		image_desc.numSamples = RHISampleCount::k1Bit;
+		image_desc.usage = rhi_usage;
+		image_desc.sharingMode = untranslate_sharing_mode(create_info.imageSharingMode);
+		image_desc.type = RHIImageType::k2D;
+		//image_desc.tiling =  ???
+
+		VkMemoryPropertyFlags mem_props = 0; // ???
+		RHIImageVk* image = new RHIImageVk(img, image_desc, mem_props, vk_layout);
+		swap_chain.images_[idx] = image;
+		// swap chain images are created with these flags?
+		swap_chain.images_[idx]->vk_access_flags_ = VK_ACCESS_MEMORY_READ_BIT;
 		swap_chain.views_[idx] = new RHIImageViewVk(view, image);
 		++idx;
 	}

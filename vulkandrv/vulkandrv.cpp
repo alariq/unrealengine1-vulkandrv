@@ -248,11 +248,11 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 
 	g_quad_staging_vb =
 		device->CreateBuffer(sizeof(vb), RHIBufferUsageFlags::kTransferSrcBit,
-							 RHIMemoryPropertyFlags::kHostVisible, RHISharingMode::kExclusive);
+							 RHIMemoryPropertyFlagBits::kHostVisible, RHISharingMode::kExclusive);
 
 	g_quad_gpu_vb = device->CreateBuffer(
 		sizeof(vb), RHIBufferUsageFlags::kVertexBufferBit | RHIBufferUsageFlags::kTransferDstBit,
-		RHIMemoryPropertyFlags::kDeviceLocal, RHISharingMode::kExclusive);
+		RHIMemoryPropertyFlagBits::kDeviceLocal, RHISharingMode::kExclusive);
 
 	assert(g_quad_gpu_vb);
 	assert(g_quad_staging_vb);
