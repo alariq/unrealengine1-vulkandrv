@@ -122,17 +122,29 @@ class RHISamplerVk: public IRHISampler {
 	VkSampler Handle() const { return handle_; }
 };
 
+////////////////////////////////////////////////////////////////////////////////
+class RHIDescriptorSetLayoutVk : public IRHIDescriptorSetLayout {
+	VkDescriptorSetLayout handle_;
+	std::vector<VkDescriptorSetLayoutBinding> bindings_;
+	~RHIDescriptorSetLayoutVk() = default;
+
+public:
+	RHIDescriptorSetLayoutVk(VkDescriptorSetLayout dsl, const RHIDescriptorSetLayoutDesc* desc,
+		int count);
+	void Destroy(IRHIDevice*);
+	VkDescriptorSetLayout Handle() const { return handle_; }
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 class RHIShaderVk: public IRHIShader {
 	VkShaderModule shader_module_;
 	std::vector<uint32_t> code_;//do we need this?
-	RHIShaderStageFlags::Value stage_;
+	RHIShaderStageFlagBits::Value stage_;
 	VkShaderStageFlags vk_stage_;
 	~RHIShaderVk() = default;
 public:
 	void Destroy(IRHIDevice* device);
-	static RHIShaderVk* Create(IRHIDevice* device, const uint32_t* pdata, uint32_t size, RHIShaderStageFlags::Value stage);
+	static RHIShaderVk* Create(IRHIDevice* device, const uint32_t* pdata, uint32_t size, RHIShaderStageFlagBits::Value stage);
 	//const unsigned char* code() const { return code_.get(); }
 	VkShaderModule Handle() const { return shader_module_; }
 };
@@ -323,6 +335,7 @@ public:
 	virtual IRHIImageView* CreateImageView(const RHIImageViewDesc* desc) ;
 	virtual IRHISampler *CreateSampler(const RHISamplerDesc *desc);
 	virtual IRHIBuffer* CreateBuffer(uint32_t size, uint32_t usage, uint32_t memprop, RHISharingMode::Value sharing) ;
+	virtual IRHIDescriptorSetLayout* CreateDescriptorSetLayout(const RHIDescriptorSetLayoutDesc* desc, int count);
 
     virtual IRHIFence* CreateFence(bool create_signalled) ;
     virtual IRHIEvent* CreateEvent() ;
@@ -336,7 +349,7 @@ public:
             const IRHIRenderPass *i_render_pass) ;
 
     virtual IRHIPipelineLayout* CreatePipelineLayout(IRHIDescriptorSetLayout* desc_set_layout) ;
-    virtual IRHIShader* CreateShader(RHIShaderStageFlags::Value stage, const uint32_t *pdata, uint32_t size) ;
+    virtual IRHIShader* CreateShader(RHIShaderStageFlagBits::Value stage, const uint32_t *pdata, uint32_t size) ;
 
 	virtual RHIFormat GetSwapChainFormat() ;
 	virtual uint32_t GetSwapChainSize()  { return (uint32_t)dev_.swap_chain_.images_.size(); }

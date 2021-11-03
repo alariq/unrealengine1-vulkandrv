@@ -326,22 +326,35 @@ VkDependencyFlags translate_dependency_flags(uint32_t dep_flags) {
 #else
 #endif
 
-VkShaderStageFlagBits translate(RHIShaderStageFlags::Value stage_flags) {
-	switch (stage_flags) {
-	case RHIShaderStageFlags::kVertex: return VK_SHADER_STAGE_VERTEX_BIT ;
-	case RHIShaderStageFlags::kTessellationControl: return VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
-	case RHIShaderStageFlags::kTessellationEvaluation: return VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT ;
-	case RHIShaderStageFlags::kGeometry: return VK_SHADER_STAGE_GEOMETRY_BIT ;
-	case RHIShaderStageFlags::kFragment: return VK_SHADER_STAGE_FRAGMENT_BIT ;
-	case RHIShaderStageFlags::kCompute: return VK_SHADER_STAGE_COMPUTE_BIT ;
+VkShaderStageFlagBits translate(RHIShaderStageFlagBits::Value stage_flag) {
+	switch (stage_flag) {
+	case RHIShaderStageFlagBits::kVertex: return VK_SHADER_STAGE_VERTEX_BIT ;
+	case RHIShaderStageFlagBits::kTessellationControl: return VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+	case RHIShaderStageFlagBits::kTessellationEvaluation: return VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT ;
+	case RHIShaderStageFlagBits::kGeometry: return VK_SHADER_STAGE_GEOMETRY_BIT ;
+	case RHIShaderStageFlagBits::kFragment: return VK_SHADER_STAGE_FRAGMENT_BIT ;
+	case RHIShaderStageFlagBits::kCompute: return VK_SHADER_STAGE_COMPUTE_BIT ;
 	default:
 		assert(0 && "Invalid shader stage flag!");
 		return VK_SHADER_STAGE_FLAG_BITS_MAX_ENUM;
 	}
 }
-VkShaderStageFlagBits translate_ssf(RHIShaderStageFlags::Value stage_flags) {
-	return translate(stage_flags);
+
+VkShaderStageFlagBits translate_ssflag(RHIShaderStageFlagBits::Value stage_flag) {
+	return translate(stage_flag);
 }
+
+VkShaderStageFlags translate_ssflags(RHIShaderStageFlags stage_flags) {
+	VkShaderStageFlags flags = 0;
+	flags |= (stage_flags & (uint32_t)RHIShaderStageFlagBits::kVertex) ? VK_SHADER_STAGE_VERTEX_BIT : 0;
+	flags |= (stage_flags & (uint32_t)RHIShaderStageFlagBits::kTessellationControl) ? VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT : 0;
+	flags |= (stage_flags & (uint32_t)RHIShaderStageFlagBits::kTessellationEvaluation) ? VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT : 0;
+	flags |= (stage_flags & (uint32_t)RHIShaderStageFlagBits::kGeometry) ? VK_SHADER_STAGE_GEOMETRY_BIT : 0;
+	flags |= (stage_flags & (uint32_t)RHIShaderStageFlagBits::kFragment) ? VK_SHADER_STAGE_FRAGMENT_BIT : 0;
+	flags |= (stage_flags & (uint32_t)RHIShaderStageFlagBits::kCompute) ? VK_SHADER_STAGE_COMPUTE_BIT : 0;
+	return flags;
+}
+
 
 #if defined(USE_PipelineBindPoint_TRANSLATION) 
 VkPipelineBindPoint translate_pbp(RHIPipelineBindPoint::Value pipeline_bind_point) {
@@ -602,6 +615,27 @@ VkCompareOp translate_compare_op(RHICompareOp::Value compare_op) {
 	}
 }
 
+VkDescriptorType translate_desc_type(RHIDescriptorType::Value type) {
+	switch (type) {
+	case RHIDescriptorType::kSampler: return VK_DESCRIPTOR_TYPE_SAMPLER;
+	case RHIDescriptorType::kCombinedImageSampler:return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	case RHIDescriptorType::kSampledImage:return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+	case RHIDescriptorType::kStorageImage:return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	case RHIDescriptorType::kUniformTexelBuffer:return VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
+	case RHIDescriptorType::kStorageTexelBuffer:return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
+	case RHIDescriptorType::kUniformBuffer:return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	case RHIDescriptorType::kStorageBuffer:return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	case RHIDescriptorType::kUniformBufferDynamic:return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+	case RHIDescriptorType::kStorageBufferDynamic:return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
+	case RHIDescriptorType::kInputAttachment:return VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
+	case RHIDescriptorType::kInlineUniformBlockExt:return VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT;
+	case RHIDescriptorType::kAccelerationStructureKHR:return VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+	default:
+		assert(0 && "Invalid descriptor type!");
+		return VK_DESCRIPTOR_TYPE_MAX_ENUM;
+	}
+}
+
 //////////////////////// Common functions ////////////////////////////////////////////////////////
 VkDeviceMemory allocate_memory(const VulkanDevice& device, const VkMemoryRequirements &mem_req,
 							   const VkMemoryPropertyFlags& mem_prop) {
@@ -661,6 +695,21 @@ void RHISamplerVk::Destroy(IRHIDevice* device) {
 	vkDestroySampler(dev->Handle(), handle_, dev->Allocator());
 }
 
+////////////// DescriptorSetLayout //////////////////////////////////////////////////
+static std::vector<VkDescriptorSetLayoutBinding>
+translate_dsl_bindings(const RHIDescriptorSetLayoutDesc *desc, int count);
+RHIDescriptorSetLayoutVk::RHIDescriptorSetLayoutVk(VkDescriptorSetLayout dsl,
+												   const RHIDescriptorSetLayoutDesc *desc,
+												   int count)
+	: handle_(dsl), bindings_(count) {
+	bindings_ = translate_dsl_bindings(desc, count);
+}
+
+void RHIDescriptorSetLayoutVk::Destroy(IRHIDevice* device) {
+	RHIDeviceVk* dev = ResourceCast(device);
+	vkDestroyDescriptorSetLayout(dev->Handle(), handle_, dev->Allocator());
+}
+
 ////////////// Frame Buffer //////////////////////////////////////////////////
 
 void RHIFrameBufferVk::Destroy(IRHIDevice* device) {
@@ -689,7 +738,7 @@ void RHIShaderVk::Destroy(IRHIDevice* device) {
 }
 
 RHIShaderVk *RHIShaderVk::Create(IRHIDevice *device, const uint32_t *pdata, uint32_t size,
-								 RHIShaderStageFlags::Value stage) {
+								 RHIShaderStageFlagBits::Value stage) {
 	VkShaderModuleCreateInfo ci = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, nullptr, 0, size,
 								   pdata};
 
@@ -704,7 +753,7 @@ RHIShaderVk *RHIShaderVk::Create(IRHIDevice *device, const uint32_t *pdata, uint
 	shader->shader_module_ = shader_module;
 	shader->code_.resize(size);
 	memcpy(shader->code_.data(), pdata, size);
-	shader->vk_stage_ = translate_ssf(stage);
+	shader->vk_stage_ = translate_ssflag(stage);
 	shader->stage_ = stage;
 
 	return shader;
@@ -766,7 +815,7 @@ RHIGraphicsPipelineVk *RHIGraphicsPipelineVk::Create(
 			VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
 			nullptr,
 			0,
-			translate_ssf(shader_stage[i].stage),
+			translate_ssflag(shader_stage[i].stage),
 			ResourceCast(shader_stage[i].module)->Handle(),
 			shader_stage[i].pEntryPointName,
 			nullptr
@@ -936,7 +985,7 @@ RHIGraphicsPipelineVk *RHIGraphicsPipelineVk::Create(
 }
 
 ////////////////////////////////////////////////////////////////////////
-IRHIShader* RHIDeviceVk::CreateShader(RHIShaderStageFlags::Value stage, const uint32_t *pdata, uint32_t size) {
+IRHIShader* RHIDeviceVk::CreateShader(RHIShaderStageFlagBits::Value stage, const uint32_t *pdata, uint32_t size) {
     return RHIShaderVk::Create(this, pdata, size, stage);
 }
 
@@ -1640,6 +1689,42 @@ IRHISampler *RHIDeviceVk::CreateSampler(const RHISamplerDesc *desc) {
 	}
 
 	return new RHISamplerVk(sampler, *desc);
+}
+
+// yes, I am returning vector by value... should not all those cool compilers do a "move", RVO or any other shenanigans?
+static std::vector<VkDescriptorSetLayoutBinding> translate_dsl_bindings(const RHIDescriptorSetLayoutDesc* desc, int count) {
+	std::vector<VkDescriptorSetLayoutBinding> bindings(count);
+	for (int i = 0; i < count; ++i) {
+		bindings[i].binding = desc[i].binding;
+		bindings[i].descriptorCount = desc[i].count;
+		bindings[i].descriptorType = translate_desc_type(desc[i].type);
+		bindings[i].stageFlags = translate_ssflags(desc[i].shader_stage_flags);
+		bindings[i].pImmutableSamplers = nullptr; // TODO:
+	}
+	return bindings;
+}
+
+IRHIDescriptorSetLayout* RHIDeviceVk::CreateDescriptorSetLayout(const RHIDescriptorSetLayoutDesc* desc, int count) {
+
+	std::vector<VkDescriptorSetLayoutBinding> bindings;
+	bindings = translate_dsl_bindings(desc, count);
+	 
+	VkDescriptorSetLayoutCreateInfo ci{};
+	ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	ci.pNext = nullptr;
+	// TODO:
+	ci.flags = 0; //VkDescriptorSetLayoutCreateFlags     flags
+	ci.bindingCount = (uint32_t)bindings.size();
+	ci.pBindings = bindings.data();
+
+	VkDescriptorSetLayout dsl;
+
+	if (vkCreateDescriptorSetLayout(dev_.device_, &ci, dev_.pallocator_, &dsl) != VK_SUCCESS) {
+		log_error("vkCreateDescriptorSetLayout: failed to create descriptor set layout!\n");
+		return nullptr;
+	}
+
+	return new RHIDescriptorSetLayoutVk(dsl, desc, count);
 }
 
 IRHIGraphicsPipeline *RHIDeviceVk::CreateGraphicsPipeline(

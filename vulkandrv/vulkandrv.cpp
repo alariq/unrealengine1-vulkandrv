@@ -336,24 +336,24 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	const uint32_t *ps =
 		(uint32_t *)filesystem::loadfile("vulkandrv/spir-v.frag.spv.bin", &ps_size);
 	RHIShaderStage tri_shader_stage[2];
-	tri_shader_stage[0].module = device->CreateShader(RHIShaderStageFlags::kVertex, vs, vs_size);
+	tri_shader_stage[0].module = device->CreateShader(RHIShaderStageFlagBits::kVertex, vs, vs_size);
 	tri_shader_stage[0].pEntryPointName = "main";
-	tri_shader_stage[0].stage = RHIShaderStageFlags::kVertex;
-	tri_shader_stage[1].module = device->CreateShader(RHIShaderStageFlags::kFragment, ps, ps_size);
+	tri_shader_stage[0].stage = RHIShaderStageFlagBits::kVertex;
+	tri_shader_stage[1].module = device->CreateShader(RHIShaderStageFlagBits::kFragment, ps, ps_size);
 	tri_shader_stage[1].pEntryPointName = "main";
-	tri_shader_stage[1].stage = RHIShaderStageFlags::kFragment;
+	tri_shader_stage[1].stage = RHIShaderStageFlagBits::kFragment;
 
 	vs = (uint32_t *)filesystem::loadfile("vulkandrv/spir-v-model.vert.spv.bin",
 										  &vs_size);
 	ps = (uint32_t *)filesystem::loadfile("vulkandrv/spir-v-model.frag.spv.bin",
 										  &ps_size);
 	RHIShaderStage quad_shader_stage[2];
-	quad_shader_stage[0].module = device->CreateShader(RHIShaderStageFlags::kVertex, vs, vs_size);
+	quad_shader_stage[0].module = device->CreateShader(RHIShaderStageFlagBits::kVertex, vs, vs_size);
 	quad_shader_stage[0].pEntryPointName = "main";
-	quad_shader_stage[0].stage = RHIShaderStageFlags::kVertex;
-	quad_shader_stage[1].module = device->CreateShader(RHIShaderStageFlags::kFragment, ps, ps_size);
+	quad_shader_stage[0].stage = RHIShaderStageFlagBits::kVertex;
+	quad_shader_stage[1].module = device->CreateShader(RHIShaderStageFlagBits::kFragment, ps, ps_size);
 	quad_shader_stage[1].pEntryPointName = "main";
-	quad_shader_stage[1].stage = RHIShaderStageFlags::kFragment;
+	quad_shader_stage[1].stage = RHIShaderStageFlagBits::kFragment;
 
 
 	RHIVertexInputState tri_vi_state;
@@ -428,6 +428,14 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	blend_att_state.dstAlphaBlendFactor = RHIBlendFactor::Zero;
 
 	RHIColorBlendState blend_state = {false, RHILogicOp::kCopy, 1, &blend_att_state, {0, 0, 0, 0}};
+
+	RHIDescriptorSetLayoutDesc dsl_desc[] = {
+		{RHIDescriptorType::kSampler, RHIShaderStageFlagBits::kFragment, 1, 0},
+		{RHIDescriptorType::kSampler, RHIShaderStageFlagBits::kFragment, 1, 1},
+		{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment|RHIShaderStageFlagBits::kVertex, 1, 2}
+	};
+
+	IRHIDescriptorSetLayout* one_sampler_dsl = device->CreateDescriptorSetLayout(dsl_desc, countof(dsl_desc));
 
 	IRHIPipelineLayout *pipeline_layout = device->CreatePipelineLayout(nullptr);
 

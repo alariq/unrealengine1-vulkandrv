@@ -404,9 +404,28 @@ struct RHISharingMode { enum Value: uint32_t {
 };
 };
 
+struct RHIDescriptorType {
+	enum Value {
+		kSampler = 0,
+		kCombinedImageSampler = 1,
+		kSampledImage = 2,
+		kStorageImage = 3,
+		kUniformTexelBuffer = 4,
+		kStorageTexelBuffer = 5,
+		kUniformBuffer = 6,
+		kStorageBuffer = 7,
+		kUniformBufferDynamic = 8,
+		kStorageBufferDynamic = 9,
+		kInputAttachment = 10,
+		kInlineUniformBlockExt = 1000138000,
+		kAccelerationStructureKHR = 1000165000,
+	};
+};
+
 enum : uint32_t {
     kSubpassExternal = ~0U
 };
+
 
 ////////////////////////////////////////////////////////////////////////////////
 struct RHIImageSubresourceRange {
@@ -475,7 +494,7 @@ struct RHIFrameBufferDesc {
 };
 
 ////////////////////////////////////////////////////////////////////////////////
-struct RHIShaderStageFlags { enum Value: uint32_t {
+struct RHIShaderStageFlagBits { enum Value: uint32_t {
 	kVertex = 0x00000001,
 	kTessellationControl = 0x00000002,
 	kTessellationEvaluation = 0x00000004,
@@ -484,6 +503,7 @@ struct RHIShaderStageFlags { enum Value: uint32_t {
 	kCompute = 0x00000020,
 };
 };
+typedef RHIFlags RHIShaderStageFlags;
 
 ////////////////////////////////////////////////////////////////////////////////
 struct RHIAttachmentRef {
@@ -556,6 +576,13 @@ struct RHIVertexInputAttributeDesc {
     uint32_t    offset;
 };
 
+struct RHIDescriptorSetLayoutDesc {
+    RHIDescriptorType::Value type;
+    RHIFlags    shader_stage_flags;
+    uint32_t    count;
+    uint32_t    binding;
+};
+
 ////////////////////////////////////////////////////////////////////////////////
 struct RHIViewport {
 	float x;
@@ -574,7 +601,7 @@ struct RHIScissor {
 };
 
 struct RHIShaderStage {
-	RHIShaderStageFlags::Value stage;
+	RHIShaderStageFlagBits::Value stage;
 	class IRHIShader *module;
 	const char *pEntryPointName;
 };
@@ -784,6 +811,8 @@ public:
 	virtual IRHIImageView*		CreateImageView(const RHIImageViewDesc* desc) = 0;
     virtual IRHISampler*        CreateSampler(const RHISamplerDesc* desc) = 0;
 	virtual IRHIBuffer*		    CreateBuffer(uint32_t size, uint32_t usage, uint32_t memprop, RHISharingMode::Value sharing) = 0;
+	virtual IRHIDescriptorSetLayout*    CreateDescriptorSetLayout(const RHIDescriptorSetLayoutDesc* desc, int count) = 0;
+
 
     virtual IRHIFence*          CreateFence(bool create_signalled) = 0;
     virtual IRHIEvent*          CreateEvent() = 0;
@@ -797,7 +826,7 @@ public:
             const IRHIRenderPass *i_render_pass) = 0;
 
     virtual IRHIPipelineLayout* CreatePipelineLayout(IRHIDescriptorSetLayout* desc_set_layout) = 0;
-    virtual IRHIShader* CreateShader(RHIShaderStageFlags::Value stage, const uint32_t *pdata, uint32_t size) = 0;
+    virtual IRHIShader* CreateShader(RHIShaderStageFlagBits::Value stage, const uint32_t *pdata, uint32_t size) = 0;
 
 
 	virtual RHIFormat               GetSwapChainFormat() = 0;
