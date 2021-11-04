@@ -14,5 +14,6 @@ IRHIImage::~IRHIImage() {}
 IRHIImageView::~IRHIImageView() {}
 IRHISampler::~IRHISampler() {}
 IRHIDescriptorSetLayout::~IRHIDescriptorSetLayout() {}
+IRHIDescriptorSet::~IRHIDescriptorSet() {}
 
 

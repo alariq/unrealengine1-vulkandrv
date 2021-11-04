@@ -125,15 +125,29 @@ class RHISamplerVk: public IRHISampler {
 ////////////////////////////////////////////////////////////////////////////////
 class RHIDescriptorSetLayoutVk : public IRHIDescriptorSetLayout {
 	VkDescriptorSetLayout handle_;
-	std::vector<VkDescriptorSetLayoutBinding> bindings_;
 	~RHIDescriptorSetLayoutVk() = default;
 
 public:
+	std::vector<VkDescriptorSetLayoutBinding> vk_bindings_;
+	std::vector<RHIDescriptorSetLayoutDesc> bindings_;
+
 	RHIDescriptorSetLayoutVk(VkDescriptorSetLayout dsl, const RHIDescriptorSetLayoutDesc* desc,
 		int count);
 	void Destroy(IRHIDevice*);
 	VkDescriptorSetLayout Handle() const { return handle_; }
 };
+
+// it is not an architecture I am just practicing typing
+
+class RHIDescriptorSetVk : public IRHIDescriptorSet {
+	VkDescriptorSet handle_;
+	~RHIDescriptorSetVk() = default;
+public:
+	const RHIDescriptorSetLayoutVk* const layout_;
+	RHIDescriptorSetVk(VkDescriptorSet ds, RHIDescriptorSetLayoutVk* layout) :handle_(ds), layout_(layout) {}
+	VkDescriptorSet Handle() const { return handle_; }
+};
+
 
 ////////////////////////////////////////////////////////////////////////////////
 class RHIShaderVk: public IRHIShader {
@@ -312,6 +326,8 @@ class RHIDeviceVk: public IRHIDevice {
 	// queue family index -> cb
 	std::unordered_map<uint32_t, VkCommandBuffer> cmd_buffers_;
 
+	std::unordered_map<RHIDescriptorSetLayoutVk*, struct DescPoolInfo*> desc_pools_;
+
 	// 
 	int32_t prev_frame_;// = -1;
 	int32_t cur_frame_;// = -1;
@@ -336,6 +352,8 @@ public:
 	virtual IRHISampler *CreateSampler(const RHISamplerDesc *desc);
 	virtual IRHIBuffer* CreateBuffer(uint32_t size, uint32_t usage, uint32_t memprop, RHISharingMode::Value sharing) ;
 	virtual IRHIDescriptorSetLayout* CreateDescriptorSetLayout(const RHIDescriptorSetLayoutDesc* desc, int count);
+
+	virtual IRHIDescriptorSet* AllocateDescriptorSet(IRHIDescriptorSetLayout* layout);
 
     virtual IRHIFence* CreateFence(bool create_signalled) ;
     virtual IRHIEvent* CreateEvent() ;

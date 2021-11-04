@@ -436,8 +436,11 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	};
 
 	IRHIDescriptorSetLayout* one_sampler_dsl = device->CreateDescriptorSetLayout(dsl_desc, countof(dsl_desc));
+	IRHIDescriptorSet* my_ds_set0 = device->AllocateDescriptorSet(one_sampler_dsl);
+	IRHIDescriptorSet* my_ds_set1 = device->AllocateDescriptorSet(one_sampler_dsl);
 
 	IRHIPipelineLayout *pipeline_layout = device->CreatePipelineLayout(nullptr);
+
 
 	g_tri_pipeline = device->CreateGraphicsPipeline(
 		&tri_shader_stage[0], countof(tri_shader_stage), &tri_vi_state, &tri_ia_state,
@@ -450,7 +453,7 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	if (!UVulkanRenderDevice::SetRes(NewX, NewY, NewColorBytes, Fullscreen)) {
 		GError->Log(L"Init: SetRes failed.");
 		return 0;
-	}
+}
 
 #if 0	
 	textureCache= new (std::nothrow) TextureCache(D3D::getDevice());

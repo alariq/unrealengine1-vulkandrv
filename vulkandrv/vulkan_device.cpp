@@ -25,6 +25,7 @@ template<> struct ResImplType<IRHICmdBuf> { typedef RHICmdBufVk Type; };
 template<> struct ResImplType<IRHIImage> { typedef RHIImageVk Type; };
 template<> struct ResImplType<IRHIImageView> { typedef RHIImageViewVk Type; };
 template<> struct ResImplType<IRHISampler> { typedef RHISamplerVk Type; };
+template<> struct ResImplType<IRHIDescriptorSetLayout> { typedef RHIDescriptorSetLayoutVk Type; };
 template<> struct ResImplType<IRHIRenderPass> { typedef RHIRenderPassVk Type; };
 template<> struct ResImplType<IRHIFrameBuffer> { typedef RHIFrameBufferVk Type; };
 template<> struct ResImplType<IRHIGraphicsPipeline> { typedef RHIGraphicsPipelineVk Type; };
@@ -702,7 +703,11 @@ RHIDescriptorSetLayoutVk::RHIDescriptorSetLayoutVk(VkDescriptorSetLayout dsl,
 												   const RHIDescriptorSetLayoutDesc *desc,
 												   int count)
 	: handle_(dsl), bindings_(count) {
-	bindings_ = translate_dsl_bindings(desc, count);
+	vk_bindings_ = translate_dsl_bindings(desc, count);
+	bindings_.resize(count);
+	for (int i = 0; i < count; ++i) {
+		bindings_[i] = desc[i];
+	}
 }
 
 void RHIDescriptorSetLayoutVk::Destroy(IRHIDevice* device) {
@@ -1725,6 +1730,99 @@ IRHIDescriptorSetLayout* RHIDeviceVk::CreateDescriptorSetLayout(const RHIDescrip
 	}
 
 	return new RHIDescriptorSetLayoutVk(dsl, desc, count);
+}
+
+struct DescPoolInfo {
+	VkDescriptorPool pool;
+	int num_alloc;
+	int max;
+	DescPoolInfo* pNext;
+};
+
+IRHIDescriptorSet* RHIDeviceVk::AllocateDescriptorSet(IRHIDescriptorSetLayout* layout) {
+
+	int num2alloc = 1;
+
+	RHIDescriptorSetLayoutVk* dsl = ResourceCast(layout);
+
+	DescPoolInfo* desc_pool_info = nullptr;
+	if (desc_pools_.count(dsl)) {
+		desc_pool_info = desc_pools_[dsl];
+		// if this triggers refactor code below into a separate function and create a new pool and
+		// assign it to the pNext
+		assert(desc_pool_info->max >= desc_pool_info->num_alloc + num2alloc);
+	}
+	else {
+
+		uint32_t desc_types[RHIDescriptorType::kCount] = {};
+		for (int i = 0; i < (int)dsl->bindings_.size(); ++i) {
+			RHIDescriptorType::Value type = dsl->bindings_[i].type;
+			assert(type >= 0 && type < RHIDescriptorType::kCount);
+			desc_types[type]++;
+		}
+
+		int idx = 0;
+		VkDescriptorPoolSize pool_sizes[RHIDescriptorType::kCount] = {};
+		for (int i = 0; i < RHIDescriptorType::kCount; ++i) {
+			if (desc_types[i]) {
+				pool_sizes[idx].descriptorCount = desc_types[i];
+				pool_sizes[idx].type = translate_desc_type((RHIDescriptorType::Value)i);
+				idx++;
+			}
+		}
+
+		uint32_t MaxSets = num2alloc + 10; // future proof :-)
+		VkDescriptorPoolCreateInfo ci = {};
+		ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+		ci.pNext = nullptr;
+		ci.flags = 0; // VkDescriptorPoolCreateFlags    flags
+		ci.maxSets = MaxSets;
+		ci.poolSizeCount = idx;
+		ci.pPoolSizes = &pool_sizes[0];
+
+		VkDescriptorPool vk_desc_pool;
+		if (vkCreateDescriptorPool(dev_.device_, &ci, dev_.pallocator_, &vk_desc_pool) != VK_SUCCESS) {
+			log_error("vkCreateDescriptorPool: Could not create descriptor pool!");
+			return nullptr;
+		}
+
+		desc_pool_info = new DescPoolInfo();
+		desc_pool_info->pool = vk_desc_pool;
+		desc_pool_info->num_alloc = 0;
+		desc_pool_info->pNext = nullptr;
+		desc_pool_info->max = MaxSets;
+
+		desc_pools_.insert(std::make_pair(dsl, desc_pool_info));
+	}
+
+	// actual allocation
+
+
+	desc_pool_info->num_alloc += num2alloc;
+
+	VkDescriptorSetLayout layouts[] = {
+		dsl->Handle()
+	};
+
+	VkDescriptorSetAllocateInfo dsa_ci = {};
+	dsa_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	dsa_ci.pNext = nullptr;
+	dsa_ci.descriptorPool = desc_pool_info->pool;
+	// every set shold have its own layout pointer
+	dsa_ci.descriptorSetCount = num2alloc;
+	dsa_ci.pSetLayouts = &layouts[0];
+
+	assert(num2alloc == 1);
+	VkDescriptorSet vk_desc_sets[1]; // a bit explicit here to not forget that multiples can be allocated
+	// every set shold have its own layout pointer
+	assert(countof(vk_desc_sets) == countof(layouts));
+
+	if (vkAllocateDescriptorSets(dev_.device_, &dsa_ci, &vk_desc_sets[0]) != VK_SUCCESS) {
+		log_error("vkAllocateDescriptorSets: Could not allocate descriptor set!\n");
+		return nullptr;
+	}
+
+	return new RHIDescriptorSetVk(vk_desc_sets[0], dsl);
 }
 
 IRHIGraphicsPipeline *RHIDeviceVk::CreateGraphicsPipeline(

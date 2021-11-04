@@ -417,8 +417,9 @@ struct RHIDescriptorType {
 		kUniformBufferDynamic = 8,
 		kStorageBufferDynamic = 9,
 		kInputAttachment = 10,
-		kInlineUniformBlockExt = 1000138000,
-		kAccelerationStructureKHR = 1000165000,
+		kInlineUniformBlockExt = 11,
+		kAccelerationStructureKHR = 12,
+        kCount = 13
 	};
 };
 
@@ -762,6 +763,11 @@ public:
 	virtual ~IRHIDescriptorSetLayout() = 0;
 };
 
+class IRHIDescriptorSet {
+public:
+	virtual ~IRHIDescriptorSet() = 0;
+};
+
 class IRHIPipelineLayout {
 public:
 	virtual ~IRHIPipelineLayout() = 0;
@@ -813,6 +819,7 @@ public:
 	virtual IRHIBuffer*		    CreateBuffer(uint32_t size, uint32_t usage, uint32_t memprop, RHISharingMode::Value sharing) = 0;
 	virtual IRHIDescriptorSetLayout*    CreateDescriptorSetLayout(const RHIDescriptorSetLayoutDesc* desc, int count) = 0;
 
+    virtual IRHIDescriptorSet* AllocateDescriptorSet(IRHIDescriptorSetLayout* layout) = 0;
 
     virtual IRHIFence*          CreateFence(bool create_signalled) = 0;
     virtual IRHIEvent*          CreateEvent() = 0;
