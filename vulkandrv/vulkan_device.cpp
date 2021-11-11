@@ -1992,7 +1992,9 @@ bool RHIDeviceVk::OnWindowSizeChanged(uint32_t width, uint32_t height, bool full
 		if (width != 0 && height != 0) {
 			log_info("Could not get swapchain res, using provided res: %d %d\n", width, height);
 		} else {
-			log_info("Could not get swapchain res, and provided res is 0, so using old res: %d %d\n", width, height);
+			log_info("Could not get swapchain res, and provided res is 0, so using old res: %d %d\n", old_w, old_h);
+			width = old_w;
+			height = old_h;
 		}
 
 		new_swapchain_data.capabilities_.currentExtent = { width, height };
