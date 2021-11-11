@@ -774,7 +774,7 @@ void RHIPipelineLayoutVk::Destroy(IRHIDevice* device) {
 }
 
 RHIPipelineLayoutVk *RHIPipelineLayoutVk::Create(IRHIDevice *device,
-												 IRHIDescriptorSetLayout *desc_set_layout) {
+												 IRHIDescriptorSetLayout */*desc_set_layout*/) {
 	VkPipelineLayoutCreateInfo ci = {
       VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, 
       nullptr,                                        

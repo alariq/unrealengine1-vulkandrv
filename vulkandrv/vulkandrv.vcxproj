@@ -280,6 +280,7 @@
       <AdditionalIncludeDirectories>.\games\UnrealTournament\Core\Inc;..\..\..\3rdparty\vulkansdk\1.2.189.2\Include;./;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <StructMemberAlignment>Default</StructMemberAlignment>
       <LanguageStandard>stdcpp14</LanguageStandard>
+      <AdditionalOptions>/w34100 /w34189 /w34456 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>

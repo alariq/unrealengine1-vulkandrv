@@ -103,7 +103,7 @@ std::vector<const char*> get_validation_layers() {
 	return actual_layer_names2enable;
 }
 
-bool get_required_extensions(HWND rw_handle, std::vector<const char*>& ext) {
+bool get_required_extensions(HWND /*rw_handle*/, std::vector<const char*>& ext) {
 
 #if 0
 	uint32_t count;

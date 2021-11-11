@@ -123,6 +123,8 @@ Constructor called by the game when the renderer is first created.
 \note Required to compile for Unreal Tournament. 
 \note Binding settings to the preferences window needs to done here instead of in init() or the game crashes when starting a map if the renderer's been restarted at least once.
 */
+#pragma warning (push)
+#pragma warning (disable: 4291)
 void UVulkanRenderDevice::StaticConstructor()
 {
 	//Make the property appear in the preferences window; this will automatically pick up the current value and write back changes.	
@@ -153,6 +155,7 @@ void UVulkanRenderDevice::StaticConstructor()
 	//stdout->_file = _open_osfhandle((long)GetStdHandle(STD_OUTPUT_HANDLE),_O_TEXT);
 	#endif
 }
+#pragma warning(pop)
 
 /**
 Initialization of renderer.
@@ -384,8 +387,8 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 
 	RHIViewport viewport;
 	viewport.x = viewport.y = 0;
-	viewport.width = (uint32_t)NewX;
-	viewport.height = (uint32_t)NewY;
+	viewport.width = (float)NewX;
+	viewport.height = (float)NewY;
 	viewport.minDepth = 0.0f;
 	viewport.maxDepth = 1.0f;
 
@@ -588,7 +591,7 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 	{		
 		TCHAR buf[8]=L"fov ";
 		_itow_s(customFOV,&buf[4],4,10);
-		Viewport->Actor->DefaultFOV=customFOV; //Do this so the value is set even if FOV settings don't take effect (multiplayer mode) 
+		Viewport->Actor->DefaultFOV=(float)customFOV; //Do this so the value is set even if FOV settings don't take effect (multiplayer mode) 
 		URenderDevice::Viewport->Exec(buf,*GLog); //And this so the FOV change actually happens				
 	}
 	
@@ -607,7 +610,7 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 	static float sec = 0.0f;
 	sec += deltaTime;
 	static vec4 color = vec4(1, 0, 0, 0);
-	color.x = 0.5f*sin(2 * 3.1415f*sec) + 0.5f;
+	color.x = 0.5f*sinf(2 * 3.1415f*sec) + 0.5f;
 
 	bool bClearScreen = false;
 	if (bClearScreen)
@@ -660,9 +663,6 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 {
 	IRHIDevice* dev = g_vulkan_device;
 	assert(1 == sanity_lock_cnt);
-
-	IRHICmdBuf* cb = g_cmdbuf[g_curCBIdx];
-
 
 	if (!g_vulkan_device->Present())
 	{

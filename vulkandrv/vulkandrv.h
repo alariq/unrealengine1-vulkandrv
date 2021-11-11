@@ -1,6 +1,12 @@
 #pragma once
+
+#pragma warning(push)
+#pragma warning(disable:4595)
+
 #include "Engine.h"
 #include "UnRender.h"
+
+#pragma warning(pop)
 
 #define SAFE_RELEASE(p)      { if(p) { (p)->Release(); (p)=NULL; } }
 #define CLAMP(p,min,max)	{ if(p < min) p = min; else if (p>max) p = max; }
