@@ -26,6 +26,7 @@ template<> struct ResImplType<IRHIImage> { typedef RHIImageVk Type; };
 template<> struct ResImplType<IRHIImageView> { typedef RHIImageViewVk Type; };
 template<> struct ResImplType<IRHISampler> { typedef RHISamplerVk Type; };
 template<> struct ResImplType<IRHIDescriptorSetLayout> { typedef RHIDescriptorSetLayoutVk Type; };
+template<> struct ResImplType<IRHIDescriptorSet> { typedef RHIDescriptorSetVk Type; };
 template<> struct ResImplType<IRHIRenderPass> { typedef RHIRenderPassVk Type; };
 template<> struct ResImplType<IRHIFrameBuffer> { typedef RHIFrameBufferVk Type; };
 template<> struct ResImplType<IRHIGraphicsPipeline> { typedef RHIGraphicsPipelineVk Type; };
@@ -702,12 +703,8 @@ translate_dsl_bindings(const RHIDescriptorSetLayoutDesc *desc, int count);
 RHIDescriptorSetLayoutVk::RHIDescriptorSetLayoutVk(VkDescriptorSetLayout dsl,
 												   const RHIDescriptorSetLayoutDesc *desc,
 												   int count)
-	: handle_(dsl), bindings_(count) {
+	: IRHIDescriptorSetLayout(desc, count), handle_(dsl) {
 	vk_bindings_ = translate_dsl_bindings(desc, count);
-	bindings_.resize(count);
-	for (int i = 0; i < count; ++i) {
-		bindings_[i] = desc[i];
-	}
 }
 
 void RHIDescriptorSetLayoutVk::Destroy(IRHIDevice* device) {
@@ -1664,26 +1661,26 @@ IRHIImageView *RHIDeviceVk::CreateImageView(const RHIImageViewDesc *desc) {
 	return new RHIImageViewVk(image_view, image);
 }
 
-IRHISampler *RHIDeviceVk::CreateSampler(const RHISamplerDesc *desc) {
+IRHISampler *RHIDeviceVk::CreateSampler(const RHISamplerDesc& desc) {
 	VkSamplerCreateInfo ci{};
 	ci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
 	ci.pNext = nullptr;
 	ci.flags = 0;
-	ci.magFilter = translate_filter(desc->magFilter);
-	ci.minFilter = translate_filter(desc->minFilter);
-	ci.mipmapMode = translate_sampler_mipmap_mode(desc->mipmapMode);
-	ci.addressModeU = translate_sampler_address_mode(desc->addressModeU);
-	ci.addressModeV = translate_sampler_address_mode(desc->addressModeV);
-	ci.addressModeW = translate_sampler_address_mode(desc->addressModeW);
+	ci.magFilter = translate_filter(desc.magFilter);
+	ci.minFilter = translate_filter(desc.minFilter);
+	ci.mipmapMode = translate_sampler_mipmap_mode(desc.mipmapMode);
+	ci.addressModeU = translate_sampler_address_mode(desc.addressModeU);
+	ci.addressModeV = translate_sampler_address_mode(desc.addressModeV);
+	ci.addressModeW = translate_sampler_address_mode(desc.addressModeW);
 	ci.mipLodBias = 0.0f;
 	ci.anisotropyEnable = VK_FALSE;
 	ci.maxAnisotropy = 1.0f;
-	ci.compareEnable = desc->compareEnable;
-	ci.compareOp = translate_compare_op(desc->compareOp);
+	ci.compareEnable = desc.compareEnable;
+	ci.compareOp = translate_compare_op(desc.compareOp);
 	ci.minLod = 0.0f;
 	ci.maxLod = 0.0f;
 	ci.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
-	ci.unnormalizedCoordinates = desc->unnormalizedCoordinates;
+	ci.unnormalizedCoordinates = desc.unnormalizedCoordinates;
 
 	VkSampler sampler;
 	if (vkCreateSampler(dev_.device_, &ci, dev_.pallocator_, &sampler) != VK_SUCCESS) {
@@ -1691,7 +1688,7 @@ IRHISampler *RHIDeviceVk::CreateSampler(const RHISamplerDesc *desc) {
 		return nullptr;
 	}
 
-	return new RHISamplerVk(sampler, *desc);
+	return new RHISamplerVk(sampler, desc);
 }
 
 // yes, I am returning vector by value... should not all those cool compilers do a "move", RVO or any other shenanigans?
@@ -1737,11 +1734,11 @@ struct DescPoolInfo {
 	DescPoolInfo* pNext;
 };
 
-IRHIDescriptorSet* RHIDeviceVk::AllocateDescriptorSet(IRHIDescriptorSetLayout* layout) {
+IRHIDescriptorSet* RHIDeviceVk::AllocateDescriptorSet(const IRHIDescriptorSetLayout* layout) {
 
 	int num2alloc = 1;
 
-	RHIDescriptorSetLayoutVk* dsl = ResourceCast(layout);
+	const RHIDescriptorSetLayoutVk* dsl = ResourceCast(layout);
 
 	DescPoolInfo* desc_pool_info = nullptr;
 	if (desc_pools_.count(dsl)) {
@@ -1821,6 +1818,103 @@ IRHIDescriptorSet* RHIDeviceVk::AllocateDescriptorSet(IRHIDescriptorSetLayout* l
 	}
 
 	return new RHIDescriptorSetVk(vk_desc_sets[0], dsl);
+}
+
+VkWriteDescriptorSet fill_write_desc_set_buffer(VkDescriptorType desc_type, VkDescriptorSet set,
+											uint32_t binding, const VkDescriptorBufferInfo* bi, uint32_t count) {
+	// would be nice to pass our RHIBufferVk and check if its usage compatible with desc_type
+	//RHIBufferVk* rhi_buf = ResourceCast(buf);
+
+	VkWriteDescriptorSet wds = {};
+	wds.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	wds.pNext = nullptr;
+    wds.dstSet = set;
+	wds.dstBinding = binding;
+	wds.dstArrayElement = 0;
+	wds.descriptorCount = count;
+	wds.descriptorType = desc_type;
+	wds.pImageInfo = nullptr;
+    wds.pBufferInfo = bi;
+    wds.pTexelBufferView = nullptr;
+	// rvo ftw
+	return wds;
+}
+
+// view and layout can be null depending on a descriptor type
+VkWriteDescriptorSet fill_write_desc_set_image(VkDescriptorType desc_type, VkDescriptorSet set,
+											   uint32_t binding, const VkDescriptorImageInfo *ii, uint32_t count) {
+
+	VkWriteDescriptorSet wds = {};
+	wds.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	wds.pNext = nullptr;
+	wds.dstSet = set;
+	wds.dstBinding = binding;
+	wds.dstArrayElement = 0;
+	wds.descriptorCount = count;
+	wds.descriptorType = desc_type;
+	wds.pImageInfo = ii;
+	wds.pBufferInfo = nullptr;
+	wds.pTexelBufferView = nullptr;
+	// rvo ftw
+	return wds;
+}
+
+// see https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkDescriptorType.html
+// for more info
+void RHIDeviceVk::UpdateDescriptorSet(const RHIDescriptorWriteDesc *desc, int count) {
+	std::vector<VkWriteDescriptorSet> write_desc;
+	std::vector<VkDescriptorImageInfo> image_info;
+	//std::vector<VkBufferView> buffer_view; // for future
+	std::vector<VkDescriptorBufferInfo > buffer_info;
+	for (int i = 0; i < count; ++i) {
+		VkDescriptorType vk_type = translate_desc_type(desc[i].type);
+		VkDescriptorSet vk_set = ResourceCast(desc[i].set)->Handle();
+		switch (vk_type) {
+
+		case VK_DESCRIPTOR_TYPE_SAMPLER: {
+			assert(desc[i].img.sampler);
+			VkSampler sampler = ResourceCast(desc[i].img.sampler)->Handle();
+			image_info.push_back({sampler, VK_NULL_HANDLE, translate_il(RHIImageLayout::kUndefined)});
+			VkWriteDescriptorSet wds =
+				fill_write_desc_set_image(vk_type, vk_set, desc[i].binding, &image_info.back(), 1);
+			write_desc.push_back(wds);
+		} break;
+		case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+		case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+		case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT: {
+			assert(desc[i].img.image_view);
+			VkImageView view = ResourceCast(desc[i].img.image_view)->Handle();
+			image_info.push_back({VK_NULL_HANDLE, view, translate_il(desc[i].img.image_layout)});
+			VkWriteDescriptorSet wds =
+				fill_write_desc_set_image(vk_type, vk_set, desc[i].binding, &image_info.back(), 1);
+			write_desc.push_back(wds);
+		} break;
+		case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER: {
+			assert(desc[i].img.sampler && desc[i].img.image_view);
+			VkSampler sampler = ResourceCast(desc[i].img.sampler)->Handle();
+			VkImageView view = ResourceCast(desc[i].img.image_view)->Handle();
+			image_info.push_back({sampler, view, translate_il(RHIImageLayout::kUndefined)});
+			VkWriteDescriptorSet wds = fill_write_desc_set_image(vk_type, vk_set, desc[i].binding, &image_info.back(), 1);
+			write_desc.push_back(wds);
+		} break;
+		case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+		case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+		case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+		case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC: {
+			assert(desc[i].buf.buffer);
+			VkBuffer buffer = ResourceCast(desc[i].buf.buffer)->Handle();
+			buffer_info.push_back({buffer, desc[i].buf.offset, desc[i].buf.range});
+			VkWriteDescriptorSet wds = fill_write_desc_set_buffer(vk_type, vk_set, desc[i].binding, &buffer_info.back(), 1);
+			write_desc.push_back(wds);
+		}
+		case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+		case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER: {
+			// TODO:
+		} break;
+		}
+	}
+
+	vkUpdateDescriptorSets(dev_.device_, (uint32_t)write_desc.size(), write_desc.data(), 0, nullptr );
 }
 
 IRHIGraphicsPipeline *RHIDeviceVk::CreateGraphicsPipeline(

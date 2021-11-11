@@ -1,6 +1,7 @@
 #pragma once
 
 #include "utils/vec.h"
+#include <vector> // :-(
 #include <stdint.h>
 #include <cassert>
 
@@ -584,6 +585,28 @@ struct RHIDescriptorSetLayoutDesc {
     uint32_t    binding;
 };
 
+struct RHIDescriptorWriteDesc {
+    RHIDescriptorType::Value type;
+    const class IRHIDescriptorSet* set;
+    uint32_t binding;
+    union {
+        struct Image {
+            const class IRHISampler* sampler;
+            const class IRHIImageView* image_view;
+            RHIImageLayout::Value image_layout;
+        } img;
+        struct Buffer {
+            const class IRHIBuffer* buffer;
+            uint64_t offset;
+            uint64_t range;
+        } buf;
+        // TODO:
+        //struct BufferView {
+        //
+        //};
+    };
+};
+
 ////////////////////////////////////////////////////////////////////////////////
 struct RHIViewport {
 	float x;
@@ -759,13 +782,27 @@ public:
 };
 
 class IRHIDescriptorSetLayout {
+protected:
 public:
+	std::vector<RHIDescriptorSetLayoutDesc> bindings_;
+    IRHIDescriptorSetLayout(const RHIDescriptorSetLayoutDesc* desc, int count):bindings_(count) {
+	    bindings_.resize(count);
+	    for (int i = 0; i < count; ++i) {
+		    bindings_[i] = desc[i];
+	    }
+    };
 	virtual ~IRHIDescriptorSetLayout() = 0;
+    const RHIDescriptorSetLayoutDesc* getBindings(int& count) const {
+        count = (int)bindings_.size();
+        return bindings_.data();
+    }
 };
 
 class IRHIDescriptorSet {
 public:
 	virtual ~IRHIDescriptorSet() = 0;
+
+	virtual const IRHIDescriptorSetLayout* getLayout() const = 0;
 };
 
 class IRHIPipelineLayout {
@@ -815,11 +852,12 @@ public:
 	virtual IRHIFrameBuffer*	CreateFrameBuffer(RHIFrameBufferDesc* desc, const IRHIRenderPass* rp_in) = 0;
 	virtual IRHIImage*		    CreateImage(const RHIImageDesc* desc, RHIImageLayout::Value initial_layout, RHIMemoryPropertyFlags mem_prop) = 0;
 	virtual IRHIImageView*		CreateImageView(const RHIImageViewDesc* desc) = 0;
-    virtual IRHISampler*        CreateSampler(const RHISamplerDesc* desc) = 0;
+    virtual IRHISampler*        CreateSampler(const RHISamplerDesc& desc) = 0;
 	virtual IRHIBuffer*		    CreateBuffer(uint32_t size, uint32_t usage, uint32_t memprop, RHISharingMode::Value sharing) = 0;
 	virtual IRHIDescriptorSetLayout*    CreateDescriptorSetLayout(const RHIDescriptorSetLayoutDesc* desc, int count) = 0;
 
-    virtual IRHIDescriptorSet* AllocateDescriptorSet(IRHIDescriptorSetLayout* layout) = 0;
+    virtual IRHIDescriptorSet* AllocateDescriptorSet(const IRHIDescriptorSetLayout* layout) = 0;
+    virtual void UpdateDescriptorSet(const RHIDescriptorWriteDesc* desc, int count) = 0;
 
     virtual IRHIFence*          CreateFence(bool create_signalled) = 0;
     virtual IRHIEvent*          CreateEvent() = 0;
@@ -859,3 +897,37 @@ struct RenderContext {
 		void* platform_data_;
 };
 #endif
+
+////////////////////////////////////////////////////////////////////////////////
+////////////////// Utils ///////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+
+struct RHIDescriptorWriteDescBuilder {
+	// ehh, remove vector from .h file!
+	RHIDescriptorWriteDesc *const desc_;
+	const int count_;
+
+	// can go without having cur_index and just decrease count_ and increase desc_ pointer but this
+	// is too "smart ass"
+	int cur_index;
+	RHIDescriptorWriteDescBuilder(RHIDescriptorWriteDesc *desc, int count)
+		: desc_(desc), count_(count), cur_index(0) {}
+
+	// can move RHI independent members up to Interfaces  (e.g. getLayout() and implement these in
+	// platform independent way because we do not need platform dependent data here, or can just
+	// make add() functions virtual and each plarform will implement them as it wishes, not sure
+	// what is better for now
+	RHIDescriptorWriteDescBuilder &add(const IRHIDescriptorSet *ds, int binding,
+									   const IRHISampler *sampler);
+
+	RHIDescriptorWriteDescBuilder &add(const IRHIDescriptorSet *ds, int binding,
+									   const IRHISampler *sampler, RHIImageLayout::Value img_layout,
+									   IRHIImageView *img_view);
+
+	RHIDescriptorWriteDescBuilder &add(const IRHIDescriptorSet *ds, int binding,
+									   const IRHIImageView *img_view,
+									   RHIImageLayout::Value img_layout);
+
+	RHIDescriptorWriteDescBuilder &add(const IRHIDescriptorSet *ds, int binding,
+									   const IRHIBuffer *buffer, uint64_t offset, uint64_t range);
+};

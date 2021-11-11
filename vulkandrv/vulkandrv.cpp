@@ -51,6 +51,9 @@ struct SimpleVertex {
     vec4 pos;
     vec4 color;
 };
+struct PerFrameUniforms {
+	mat4 camera;
+};
 
 RHIVertexInputBindingDesc vert_bindings_desc[] = {
 	{0, sizeof(SimpleVertex), RHIVertexInputRate::kVertex}};
@@ -80,6 +83,8 @@ std::vector<IRHIFrameBuffer*> g_main_fb;
 
 IRHIGraphicsPipeline *g_tri_pipeline = nullptr;
 IRHIGraphicsPipeline *g_quad_pipeline = nullptr;
+
+IRHIBuffer* g_uniform_buffer = 0;
 
 
 /**
@@ -434,13 +439,41 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 
 	RHIDescriptorSetLayoutDesc dsl_desc[] = {
 		{RHIDescriptorType::kSampler, RHIShaderStageFlagBits::kFragment, 1, 0},
-		{RHIDescriptorType::kSampler, RHIShaderStageFlagBits::kFragment, 1, 1},
+		{RHIDescriptorType::kCombinedImageSampler, RHIShaderStageFlagBits::kFragment, 1, 1},
 		{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment|RHIShaderStageFlagBits::kVertex, 1, 2}
 	};
+
+	RHISamplerDesc sampler_desc;
+	sampler_desc.magFilter = RHIFilter::kLinear;
+	sampler_desc.minFilter = RHIFilter::kLinear;
+	sampler_desc.mipmapMode = RHISamplerMipmapMode::kLinear;
+	sampler_desc.addressModeU = RHISamplerAddressMode::kRepeat;
+	sampler_desc.addressModeV = RHISamplerAddressMode::kRepeat;
+	sampler_desc.addressModeW = RHISamplerAddressMode::kRepeat;
+	sampler_desc.mipLodBias = 0;
+	sampler_desc.anisotropyEnable = false;
+	sampler_desc.maxAnisotropy = 0.0f;
+	sampler_desc.compareEnable = false;
+	sampler_desc.compareOp = RHICompareOp::kAlways;
+	sampler_desc.minLod = 0;
+	sampler_desc.maxLod = 10;
+	sampler_desc.unnormalizedCoordinates = false;
+	IRHISampler* test_sampler = device->CreateSampler(sampler_desc);
+
+	g_uniform_buffer =
+		device->CreateBuffer(sizeof(PerFrameUniforms), RHIBufferUsageFlags::kUniformBufferBit,
+							 RHIMemoryPropertyFlagBits::kDeviceLocal, RHISharingMode::kExclusive);
 
 	IRHIDescriptorSetLayout* one_sampler_dsl = device->CreateDescriptorSetLayout(dsl_desc, countof(dsl_desc));
 	IRHIDescriptorSet* my_ds_set0 = device->AllocateDescriptorSet(one_sampler_dsl);
 	IRHIDescriptorSet* my_ds_set1 = device->AllocateDescriptorSet(one_sampler_dsl);
+
+	RHIDescriptorWriteDesc desc_write_desc[4];
+	RHIDescriptorWriteDescBuilder builder(desc_write_desc, countof(desc_write_desc));
+	builder.add(my_ds_set0, 0, test_sampler)
+		.add(my_ds_set0, 2, g_uniform_buffer, 0, sizeof(PerFrameUniforms));
+	builder.add(my_ds_set1, 0, test_sampler).add(my_ds_set1, 2, g_uniform_buffer, 0, sizeof(PerFrameUniforms));
+	device->UpdateDescriptorSet(desc_write_desc, builder.cur_index);
 
 	IRHIPipelineLayout *pipeline_layout = device->CreatePipelineLayout(nullptr);
 
