@@ -1274,12 +1274,10 @@ void RHICmdBufVk::EndRenderPass(const IRHIRenderPass *i_rp, IRHIFrameBuffer *i_f
 	const RHIRenderPassVk* rp = ResourceCast(i_rp);
     RHIFrameBufferVk* fb = ResourceCast(i_fb);
 	const std::vector<RHIImageViewVk*>& attachments = fb->GetAttachments();
-    uint32_t i=0;
 	for (int i = 0; i < (int)attachments.size();++i) {
 		RHIImageViewVk* att = attachments[i];
         RHIImageVk* img = ResourceCast(att->GetImage());
         img->vk_layout_ = translate_il(rp->GetFinalLayout(i));
-        ++i;
     }
 }
 
