@@ -85,6 +85,9 @@ IRHIGraphicsPipeline *g_tri_pipeline = nullptr;
 IRHIGraphicsPipeline *g_quad_pipeline = nullptr;
 
 IRHIBuffer* g_uniform_buffer = 0;
+IRHIDescriptorSetLayout* g_my_layout = 0;
+IRHIDescriptorSet* g_my_ds_set0 = 0;
+IRHIDescriptorSet* g_my_ds_set1 = 0;
 
 
 /**
@@ -286,8 +289,7 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	sp_desc.bindPoint = RHIPipelineBindPoint::kGraphics;
 	sp_desc.colorAttachmentCount = 1;
 	sp_desc.colorAttachments = &color_att_ref;
-	sp_desc.depthStencilAttachmentCount = 0;
-	sp_desc.depthStencilAttachments = nullptr;
+	sp_desc.depthStencilAttachment = nullptr;
 	sp_desc.inputAttachmentCount = 0;
 	sp_desc.inputAttachments = nullptr;
 	sp_desc.preserveAttachmentCount = 0;
@@ -439,8 +441,8 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 
 	RHIDescriptorSetLayoutDesc dsl_desc[] = {
 		{RHIDescriptorType::kSampler, RHIShaderStageFlagBits::kFragment, 1, 0},
-		{RHIDescriptorType::kCombinedImageSampler, RHIShaderStageFlagBits::kFragment, 1, 1},
-		{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment|RHIShaderStageFlagBits::kVertex, 1, 2}
+		//{RHIDescriptorType::kCombinedImageSampler, RHIShaderStageFlagBits::kFragment, 1, 1},
+		//{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment|RHIShaderStageFlagBits::kVertex, 1, 2}
 	};
 
 	RHISamplerDesc sampler_desc;
@@ -459,24 +461,25 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	sampler_desc.maxLod = 10;
 	sampler_desc.unnormalizedCoordinates = false;
 	IRHISampler* test_sampler = device->CreateSampler(sampler_desc);
+	IRHISampler* test_sampler2 = device->CreateSampler(sampler_desc);
 
 	g_uniform_buffer =
 		device->CreateBuffer(sizeof(PerFrameUniforms), RHIBufferUsageFlags::kUniformBufferBit,
 							 RHIMemoryPropertyFlagBits::kDeviceLocal, RHISharingMode::kExclusive);
 
-	IRHIDescriptorSetLayout* one_sampler_dsl = device->CreateDescriptorSetLayout(dsl_desc, countof(dsl_desc));
-	IRHIDescriptorSet* my_ds_set0 = device->AllocateDescriptorSet(one_sampler_dsl);
-	IRHIDescriptorSet* my_ds_set1 = device->AllocateDescriptorSet(one_sampler_dsl);
+	g_my_layout = device->CreateDescriptorSetLayout(dsl_desc, countof(dsl_desc));
+	g_my_ds_set0 = device->AllocateDescriptorSet(g_my_layout);
+	g_my_ds_set1 = device->AllocateDescriptorSet(g_my_layout);
 
 	RHIDescriptorWriteDesc desc_write_desc[4];
 	RHIDescriptorWriteDescBuilder builder(desc_write_desc, countof(desc_write_desc));
-	builder.add(my_ds_set0, 0, test_sampler)
-		.add(my_ds_set0, 2, g_uniform_buffer, 0, sizeof(PerFrameUniforms));
-	builder.add(my_ds_set1, 0, test_sampler).add(my_ds_set1, 2, g_uniform_buffer, 0, sizeof(PerFrameUniforms));
+	builder.add(g_my_ds_set0, 0, test_sampler)
+		//.add(g_my_ds_set0, 2, g_uniform_buffer, 0, sizeof(PerFrameUniforms));
+		.add(g_my_ds_set1, 0, test_sampler2);// .add(g_my_ds_set1, 2, g_uniform_buffer, 0, sizeof(PerFrameUniforms));
 	device->UpdateDescriptorSet(desc_write_desc, builder.cur_index);
 
-	IRHIPipelineLayout *pipeline_layout = device->CreatePipelineLayout(nullptr);
-
+	const IRHIDescriptorSetLayout* pipe_layout_desc[] = { g_my_layout, g_my_layout };
+	IRHIPipelineLayout *pipeline_layout = device->CreatePipelineLayout(pipe_layout_desc, countof(pipe_layout_desc));
 
 	g_tri_pipeline = device->CreateGraphicsPipeline(
 		&tri_shader_stage[0], countof(tri_shader_stage), &tri_vi_state, &tri_ia_state,
@@ -668,6 +671,10 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 		ivec4 render_area(0, 0, fb_image->Width(), fb_image->Height());
 		RHIClearValue clear_value = { vec4(0,1,0, 0), 0.0f, 0 };
 		cb->BeginRenderPass(g_main_pass, cur_fb, &render_area, &clear_value, 1);
+
+
+		const IRHIDescriptorSet* sets[] = { g_my_ds_set0, g_my_ds_set1};
+		cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_tri_pipeline->Layout(), sets, countof(sets));
 
 		cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_tri_pipeline);
 		cb->Draw(3, 1, 0, 0);

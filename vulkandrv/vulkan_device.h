@@ -139,9 +139,9 @@ public:
 
 class RHIDescriptorSetVk : public IRHIDescriptorSet {
 	VkDescriptorSet handle_;
+	const RHIDescriptorSetLayoutVk* const layout_;
 	~RHIDescriptorSetVk() = default;
 public:
-	const RHIDescriptorSetLayoutVk* const layout_;
 	RHIDescriptorSetVk(VkDescriptorSet ds, const RHIDescriptorSetLayoutVk* layout) :handle_(ds), layout_(layout) {}
 	VkDescriptorSet Handle() const { return handle_; }
 
@@ -166,15 +166,22 @@ public:
 ////////////////////////////////////////////////////////////////////////////////
 class RHIPipelineLayoutVk: public IRHIPipelineLayout {
 	VkPipelineLayout handle_;
+	std::vector<const IRHIDescriptorSetLayout*> ds_layouts;
 public:
 	void Destroy(IRHIDevice* device);
-	static RHIPipelineLayoutVk* Create(IRHIDevice* device, IRHIDescriptorSetLayout* desc_set_layout);
+  static RHIPipelineLayoutVk *
+  Create(IRHIDevice *device, const IRHIDescriptorSetLayout *const *desc_set_layout, uint32_t count);
+
+	int getDSLCount() const { return (int)ds_layouts.size(); }
+	const IRHIDescriptorSetLayout* getLayout(int i) const { return ds_layouts[i]; }
 	VkPipelineLayout Handle() const { return handle_; }
+
 };
 
 ////////////////////////////////////////////////////////////////////////////////
 class RHIGraphicsPipelineVk: public IRHIGraphicsPipeline {
 	VkPipeline handle_;
+	const RHIPipelineLayoutVk* const layout_;
 public:
 	void Destroy(IRHIDevice *device);
 	static RHIGraphicsPipelineVk *
@@ -186,7 +193,10 @@ public:
 		   const RHIColorBlendState *color_blend_state, const IRHIPipelineLayout *pipleline_layout,
 		   const IRHIRenderPass *render_pass);
 
+	RHIGraphicsPipelineVk(VkPipeline pipeline, const RHIPipelineLayoutVk *playout)
+		: handle_(pipeline), layout_(playout) {}
 	VkPipeline Handle() const { return handle_; }
+	const IRHIPipelineLayout* Layout() const { return layout_; }
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -282,6 +292,9 @@ public:
 	virtual void EndRenderPass(const IRHIRenderPass *i_rp, IRHIFrameBuffer *i_fb) ;
 	virtual void Clear(IRHIImage* image_in, const vec4& color, uint32_t img_aspect_bits) ;
 	virtual void BindPipeline(RHIPipelineBindPoint::Value bind_point, IRHIGraphicsPipeline* pipeline) ;
+	virtual void BindDescriptorSets(RHIPipelineBindPoint::Value bind_point,
+									const IRHIPipelineLayout* pipeline_layout,
+									const IRHIDescriptorSet *const*desc_sets, uint32_t count);
 
 };
 
@@ -367,8 +380,8 @@ public:
             const RHIColorBlendState *color_blend_state, const IRHIPipelineLayout *i_pipleline_layout,
             const IRHIRenderPass *i_render_pass) ;
 
-    virtual IRHIPipelineLayout* CreatePipelineLayout(IRHIDescriptorSetLayout* desc_set_layout) ;
-    virtual IRHIShader* CreateShader(RHIShaderStageFlagBits::Value stage, const uint32_t *pdata, uint32_t size) ;
+    virtual IRHIPipelineLayout* CreatePipelineLayout(const IRHIDescriptorSetLayout*const* desc_set_layout, uint32_t count);
+    virtual IRHIShader* CreateShader(RHIShaderStageFlagBits::Value stage, const uint32_t *pdata, uint32_t size);
 
 	virtual RHIFormat GetSwapChainFormat() ;
 	virtual uint32_t GetSwapChainSize()  { return (uint32_t)dev_.swap_chain_.images_.size(); }

@@ -771,15 +771,21 @@ void RHIPipelineLayoutVk::Destroy(IRHIDevice* device) {
 }
 
 RHIPipelineLayoutVk *RHIPipelineLayoutVk::Create(IRHIDevice *device,
-												 IRHIDescriptorSetLayout */*desc_set_layout*/) {
+												 const IRHIDescriptorSetLayout* const* desc_set_layouts, uint32_t count) {
+	std::vector<VkDescriptorSetLayout> vk_layout_arr(count);
+	for (int i = 0; i < (int)count; ++i) {
+		const RHIDescriptorSetLayoutVk* ds_layout = ResourceCast(desc_set_layouts[i]);
+		vk_layout_arr[i] = ds_layout->Handle();
+	}
+
 	VkPipelineLayoutCreateInfo ci = {
       VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, 
       nullptr,                                        
       0,                                              
-      0,                                              // uint32_t                       setLayoutCount
-      nullptr,                                        // const VkDescriptorSetLayout   *pSetLayouts
-      0,                                              // uint32_t                       pushConstantRangeCount
-      nullptr                                         // const VkPushConstantRange     *pPushConstantRanges
+      (uint32_t)vk_layout_arr.size(),// uint32_t                       setLayoutCount
+      vk_layout_arr.data(),          // const VkDescriptorSetLayout   *pSetLayouts
+      0,                             // uint32_t                       pushConstantRangeCount
+      nullptr                        // const VkPushConstantRange     *pPushConstantRanges
     };
 
 	VkPipelineLayout pipeline_layout;
@@ -791,6 +797,9 @@ RHIPipelineLayoutVk *RHIPipelineLayoutVk::Create(IRHIDevice *device,
 	}
 
 	RHIPipelineLayoutVk *pl = new RHIPipelineLayoutVk();
+	for (int i = 0; i < (int)count; ++i) {
+		pl->ds_layouts.push_back(desc_set_layouts[i]);
+	}
 	pl->handle_ = pipeline_layout;
 	return pl;
 }
@@ -981,8 +990,7 @@ RHIGraphicsPipelineVk *RHIGraphicsPipelineVk::Create(
 		return nullptr;
 	}
 
-	RHIGraphicsPipelineVk* vk_pipeline = new RHIGraphicsPipelineVk();
-	vk_pipeline->handle_ = pipeline;
+	RHIGraphicsPipelineVk* vk_pipeline = new RHIGraphicsPipelineVk(pipeline, playout);
 	return vk_pipeline;
 }
 
@@ -1322,6 +1330,34 @@ void RHICmdBufVk::BindPipeline(RHIPipelineBindPoint::Value bind_point, IRHIGraph
     vkCmdBindPipeline(cb_, translate_pbp(bind_point), pipeline->Handle());
 }
 
+void RHICmdBufVk::BindDescriptorSets(RHIPipelineBindPoint::Value bind_point,
+	const IRHIPipelineLayout* pipeline_layout,
+	const IRHIDescriptorSet*const* desc_sets, uint32_t count) {
+
+	const RHIPipelineLayoutVk* pipe_layout = ResourceCast(pipeline_layout);
+	//TODO: stack allocated array
+	std::vector<VkDescriptorSet> sets(count);
+	for (int i = 0; i < (int)count; ++i) {
+		// yep pointer compare, assume no same layouts in different objects, but can change in future
+		const RHIDescriptorSetVk* set = ResourceCast(desc_sets[i]);
+		bool b_found_compatible = false;
+		for (int j = 0; j < pipe_layout->getDSLCount(); j++) {
+			if (desc_sets[i]->getLayout() == pipe_layout->getLayout(j)) {
+				b_found_compatible = true;
+			}
+		}
+		assert(b_found_compatible);
+		sets[i] = set->Handle();
+	}
+	// actually it is allowed to bind less descriptor sets than set in pipeline layout, but we have
+	// a stronger condition here for now, just to catch some potential issues
+
+	// !NB: not sure why stack gets corrupted on assert(s) :-/
+	assert(pipe_layout->getDSLCount() == (int)count);
+	vkCmdBindDescriptorSets(cb_, translate_pbp(bind_point), pipe_layout->Handle(), 0,
+							(uint32_t)sets.size(), sets.data(), 0, nullptr);
+}
+
 void RHICmdBufVk::Draw(uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex,
 					  uint32_t first_instance) {
     assert(is_recording_);
@@ -1475,9 +1511,12 @@ IRHIRenderPass* RHIDeviceVk::CreateRenderPass(const RHIRenderPassDesc* desc) {
 	assert(desc);
 	std::vector<VkAttachmentDescription> att_desc_arr(desc->attachmentCount);
 	std::vector<VkSubpassDescription> subpass_desc_arr(desc->subpassCount);
-	std::vector<VkAttachmentReference> input_ref_arr;
-	std::vector<VkAttachmentReference> color_ref_arr;
-	std::vector<VkAttachmentReference> depth_stencil_ref_arr;
+	const size_t fixed_array_size = desc->subpassCount * 8;
+	size_t ir_idx = 0;
+	size_t cr_idx = 0;
+	std::vector<VkAttachmentReference> input_ref_arr(fixed_array_size);
+	std::vector<VkAttachmentReference> color_ref_arr(fixed_array_size);
+	std::vector<VkAttachmentReference> depth_stencil_ref_arr(desc->subpassCount);
 	std::vector<VkSubpassDependency> dep_arr(desc->dependencyCount);
 
 	std::vector<RHIImageLayout::Value> att_final_layouts(desc->attachmentCount);
@@ -1496,6 +1535,8 @@ IRHIRenderPass* RHIDeviceVk::CreateRenderPass(const RHIRenderPassDesc* desc) {
         att_final_layouts[i] = att_desc[i].finalLayout;
 	}
 
+	int off_ir = 0;
+	int off_cr = 0;
 	for (int i = 0; i < desc->subpassCount; ++i) {
 		const RHISubpassDesc& sp_desc = desc->subpassDesc[i];
 		subpass_desc_arr[i].flags = 0;
@@ -1508,27 +1549,38 @@ IRHIRenderPass* RHIDeviceVk::CreateRenderPass(const RHIRenderPassDesc* desc) {
 			VkAttachmentReference ar;
 			ar.attachment = sp_desc.inputAttachments[ia].index;
 			ar.layout = translate(sp_desc.inputAttachments[ia].layout);
-			input_ref_arr.push_back(ar);
+			input_ref_arr[ir_idx++] = ar;
 		}
-		subpass_desc_arr[i].pInputAttachments = input_ref_arr.data();
+		subpass_desc_arr[i].pInputAttachments =
+			sp_desc.inputAttachmentCount ? input_ref_arr.data() + off_ir : nullptr;
 
 		for (int ca = 0; ca < sp_desc.colorAttachmentCount; ++ca) {
 			VkAttachmentReference ar;
 			ar.attachment = sp_desc.colorAttachments[ca].index;
 			ar.layout = translate(sp_desc.colorAttachments[ca].layout);
-			color_ref_arr.push_back(ar);
+			color_ref_arr[cr_idx++] = ar;
 		}
-		subpass_desc_arr[i].pColorAttachments = color_ref_arr.data();
+		subpass_desc_arr[i].pColorAttachments =
+			sp_desc.colorAttachmentCount ? color_ref_arr.data() + off_ir : nullptr;
 
-		for (int dsa = 0; dsa < sp_desc.depthStencilAttachmentCount; ++dsa) {
+		subpass_desc_arr[i].pDepthStencilAttachment = nullptr;
+		if(sp_desc.depthStencilAttachment)
+		{
 			VkAttachmentReference ar;
-			ar.attachment = sp_desc.depthStencilAttachments[dsa].index;
-			ar.layout = translate(sp_desc.depthStencilAttachments[dsa].layout);
-			depth_stencil_ref_arr.push_back(ar);
+			ar.attachment = sp_desc.depthStencilAttachment->index;
+			ar.layout = translate(sp_desc.depthStencilAttachment->layout);
+			depth_stencil_ref_arr[i] = ar;
+			subpass_desc_arr[i].pDepthStencilAttachment = &depth_stencil_ref_arr[i];
 		}
-		subpass_desc_arr[i].pDepthStencilAttachment = depth_stencil_ref_arr.data();
+
 		subpass_desc_arr[i].pPreserveAttachments = subpass_desc_arr[i].pPreserveAttachments;
+
+		off_ir = ir_idx;
+		off_cr = cr_idx;
 	}
+
+	assert(ir_idx <= fixed_array_size);
+	assert(cr_idx <= fixed_array_size);
 
 	for (int i = 0; i < desc->dependencyCount; ++i) {
 		const RHISubpassDependency& sp_dep = desc->dependencies[i];
@@ -1862,10 +1914,16 @@ VkWriteDescriptorSet fill_write_desc_set_image(VkDescriptorType desc_type, VkDes
 // see https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkDescriptorType.html
 // for more info
 void RHIDeviceVk::UpdateDescriptorSet(const RHIDescriptorWriteDesc *desc, int count) {
-	std::vector<VkWriteDescriptorSet> write_desc;
-	std::vector<VkDescriptorImageInfo> image_info;
-	//std::vector<VkBufferView> buffer_view; // for future
-	std::vector<VkDescriptorBufferInfo > buffer_info;
+	// !NB: Because we remember pointers to array elements we cannot reallocate them, so have to
+	// account for a worth case, still those are temp arrays, so should allocate from a preallocated
+	// scratch buffer or just use indices and resolve addresses later
+	// NOTE: write_desc can be reallocated though
+	std::vector<VkWriteDescriptorSet> write_desc(count);
+	std::vector<VkDescriptorImageInfo> image_info(count);
+	int ii_idx = 0;
+	//std::vector<VkBufferView> buffer_view(count); // for future
+	std::vector<VkDescriptorBufferInfo > buffer_info(count);
+	int bi_idx = 0;
 	for (int i = 0; i < count; ++i) {
 		VkDescriptorType vk_type = translate_desc_type(desc[i].type);
 		VkDescriptorSet vk_set = ResourceCast(desc[i].set)->Handle();
@@ -1874,28 +1932,29 @@ void RHIDeviceVk::UpdateDescriptorSet(const RHIDescriptorWriteDesc *desc, int co
 		case VK_DESCRIPTOR_TYPE_SAMPLER: {
 			assert(desc[i].img.sampler);
 			VkSampler sampler = ResourceCast(desc[i].img.sampler)->Handle();
-			image_info.push_back({sampler, VK_NULL_HANDLE, translate_il(RHIImageLayout::kUndefined)});
-			VkWriteDescriptorSet wds =
-				fill_write_desc_set_image(vk_type, vk_set, desc[i].binding, &image_info.back(), 1);
-			write_desc.push_back(wds);
+			image_info[ii_idx] = {sampler, VK_NULL_HANDLE, translate_il(RHIImageLayout::kUndefined)};
+			write_desc[i] =
+				fill_write_desc_set_image(vk_type, vk_set, desc[i].binding, &image_info[ii_idx], 1);
+			ii_idx++;
 		} break;
 		case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
 		case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
 		case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT: {
 			assert(desc[i].img.image_view);
 			VkImageView view = ResourceCast(desc[i].img.image_view)->Handle();
-			image_info.push_back({VK_NULL_HANDLE, view, translate_il(desc[i].img.image_layout)});
-			VkWriteDescriptorSet wds =
-				fill_write_desc_set_image(vk_type, vk_set, desc[i].binding, &image_info.back(), 1);
-			write_desc.push_back(wds);
+			image_info[ii_idx] = {VK_NULL_HANDLE, view, translate_il(desc[i].img.image_layout)};
+			write_desc[i] =
+				fill_write_desc_set_image(vk_type, vk_set, desc[i].binding, &image_info[ii_idx], 1);
+			ii_idx++;
 		} break;
 		case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER: {
 			assert(desc[i].img.sampler && desc[i].img.image_view);
 			VkSampler sampler = ResourceCast(desc[i].img.sampler)->Handle();
 			VkImageView view = ResourceCast(desc[i].img.image_view)->Handle();
-			image_info.push_back({sampler, view, translate_il(RHIImageLayout::kUndefined)});
-			VkWriteDescriptorSet wds = fill_write_desc_set_image(vk_type, vk_set, desc[i].binding, &image_info.back(), 1);
-			write_desc.push_back(wds);
+			image_info[ii_idx] = { sampler, view, translate_il(RHIImageLayout::kUndefined) };
+			write_desc[i] =
+				fill_write_desc_set_image(vk_type, vk_set, desc[i].binding, &image_info[ii_idx], 1);
+			ii_idx++;
 		} break;
 		case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
 		case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
@@ -1903,10 +1962,11 @@ void RHIDeviceVk::UpdateDescriptorSet(const RHIDescriptorWriteDesc *desc, int co
 		case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC: {
 			assert(desc[i].buf.buffer);
 			VkBuffer buffer = ResourceCast(desc[i].buf.buffer)->Handle();
-			buffer_info.push_back({buffer, desc[i].buf.offset, desc[i].buf.range});
-			VkWriteDescriptorSet wds = fill_write_desc_set_buffer(vk_type, vk_set, desc[i].binding, &buffer_info.back(), 1);
-			write_desc.push_back(wds);
-		}
+			buffer_info[bi_idx] = { buffer, desc[i].buf.offset, desc[i].buf.range };
+			write_desc[i] = fill_write_desc_set_buffer(vk_type, vk_set, desc[i].binding,
+													   &buffer_info[bi_idx], 1);
+			bi_idx++;
+		} break;
 		case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
 		case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER: {
 			// TODO:
@@ -1914,7 +1974,10 @@ void RHIDeviceVk::UpdateDescriptorSet(const RHIDescriptorWriteDesc *desc, int co
 		}
 	}
 
-	vkUpdateDescriptorSets(dev_.device_, (uint32_t)write_desc.size(), write_desc.data(), 0, nullptr );
+	assert(ii_idx + bi_idx == count);
+
+	vkUpdateDescriptorSets(dev_.device_, (uint32_t)write_desc.size(), write_desc.data(), 0,
+						   nullptr);
 }
 
 IRHIGraphicsPipeline *RHIDeviceVk::CreateGraphicsPipeline(
@@ -1931,8 +1994,8 @@ IRHIGraphicsPipeline *RHIDeviceVk::CreateGraphicsPipeline(
 										 i_render_pass);
 }
 
-IRHIPipelineLayout* RHIDeviceVk::CreatePipelineLayout(IRHIDescriptorSetLayout* desc_set_layout) {
-    return RHIPipelineLayoutVk::Create(this, desc_set_layout);
+IRHIPipelineLayout* RHIDeviceVk::CreatePipelineLayout(const IRHIDescriptorSetLayout*const* desc_set_layout, uint32_t count) {
+    return RHIPipelineLayoutVk::Create(this, desc_set_layout, count);
 }
 
 IRHIBuffer *RHIDeviceVk::CreateBuffer(uint32_t size, uint32_t usage, uint32_t memprop_flags,

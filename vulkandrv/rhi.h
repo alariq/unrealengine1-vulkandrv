@@ -530,8 +530,7 @@ struct RHISubpassDesc {
 	RHIAttachmentRef* inputAttachments;
 	int colorAttachmentCount;
 	RHIAttachmentRef* colorAttachments;
-	int depthStencilAttachmentCount;
-	RHIAttachmentRef* depthStencilAttachments;
+	RHIAttachmentRef* depthStencilAttachment; // one
 	int preserveAttachmentCount;
 	uint32_t* preserveAttachments;
 };
@@ -732,6 +731,9 @@ public:
 	virtual bool BeginRenderPass(IRHIRenderPass *i_rp, IRHIFrameBuffer *i_fb, const ivec4 *render_area,
 					   const RHIClearValue *clear_values, uint32_t count) = 0;
 	virtual void BindPipeline(RHIPipelineBindPoint::Value bind_point, IRHIGraphicsPipeline* pipeline) = 0;
+	virtual void BindDescriptorSets(RHIPipelineBindPoint::Value bind_point,
+									const class IRHIPipelineLayout* pipeline_layout,
+									const class IRHIDescriptorSet * const*desc_sets, uint32_t count) = 0;
 	virtual void Draw(uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex,
 					  uint32_t first_instance) = 0;
 
@@ -813,6 +815,7 @@ public:
 class IRHIGraphicsPipeline{
 public:
 	virtual ~IRHIGraphicsPipeline() = 0; 
+    virtual const IRHIPipelineLayout* Layout() const = 0;
 };
 
 class IRHIBuffer {
@@ -870,7 +873,7 @@ public:
             const RHIColorBlendState *color_blend_state, const IRHIPipelineLayout *i_pipleline_layout,
             const IRHIRenderPass *i_render_pass) = 0;
 
-    virtual IRHIPipelineLayout* CreatePipelineLayout(IRHIDescriptorSetLayout* desc_set_layout) = 0;
+    virtual IRHIPipelineLayout* CreatePipelineLayout(const IRHIDescriptorSetLayout* const* desc_set_layouts, uint32_t count) = 0;
     virtual IRHIShader* CreateShader(RHIShaderStageFlagBits::Value stage, const uint32_t *pdata, uint32_t size) = 0;
 
 
