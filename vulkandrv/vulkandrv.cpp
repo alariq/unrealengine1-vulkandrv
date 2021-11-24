@@ -16,6 +16,7 @@
 #include "utils/logging.h"
 #include "utils/macros.h"
 #include "utils/file_utils.h"
+#include "utils/Image.h"
 //#include "texconverter.h"
 //#include "customflags.h"
 #include "misc.h"
@@ -50,6 +51,7 @@ static LARGE_INTEGER perfCounterFreq;
 struct SimpleVertex {
     vec4 pos;
     vec4 color;
+    vec2 uv;
 };
 struct PerFrameUniforms {
 	mat4 camera;
@@ -62,13 +64,15 @@ RHIVertexInputAttributeDesc va_desc[] = {
 	{0, vert_bindings_desc[0].binding, RHIFormat::kR32G32B32A32_SFLOAT,
 	 offsetof(SimpleVertex, pos)},
 	{1, vert_bindings_desc[0].binding, RHIFormat::kR32G32B32A32_SFLOAT,
-	 offsetof(SimpleVertex, color)}};
+	 offsetof(SimpleVertex, color)},
+	{2, vert_bindings_desc[0].binding, RHIFormat::kR32G32_SFLOAT,
+	 offsetof(SimpleVertex, uv)}};
 
 // Create Test Vertex Buffer
-SimpleVertex vb[] = {{{-0.55f, -0.55f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 0.0f}},
-					 {{-0.55f, 0.55f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f, 0.0f}},
-					 {{0.55f, -0.55f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 0.0f}},
-					 {{0.55f, 0.55f, 0.0f, 1.0f}, {0.45f, 0.45f, 0.45f, 0.0f}}};
+SimpleVertex vb[] = {{{-0.55f, -0.55f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+					 {{-0.55f, 0.55f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f, 0.0f}, {0.0f, 1.0f}},
+					 {{0.55f, -0.55f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+					 {{0.55f, 0.55f, 0.0f, 1.0f}, {0.45f, 0.45f, 0.45f, 0.0f}, {1.0f, 1.0f}}};
 
 static int g_curCBIdx = 0;
 static int g_curFBIdx = 0;
@@ -88,6 +92,12 @@ IRHIBuffer* g_uniform_buffer = 0;
 IRHIDescriptorSetLayout* g_my_layout = 0;
 IRHIDescriptorSet* g_my_ds_set0 = 0;
 IRHIDescriptorSet* g_my_ds_set1 = 0;
+
+IRHIImage* g_test_image = 0;
+IRHIImageView* g_test_image_view = 0;
+// temp buffer to store image data before copying to gpu mem
+IRHIBuffer* g_img_staging_buf = 0;
+IRHIEvent* g_img_copy_event= nullptr;	
 
 
 /**
@@ -365,6 +375,58 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	quad_shader_stage[1].pEntryPointName = "main";
 	quad_shader_stage[1].stage = RHIShaderStageFlagBits::kFragment;
 
+	Image img;
+	const char *image_path = "./data/ut.bmp";
+	if (!img.loadFromFile(image_path)) {
+		log_error("Init: failed to load; %s\n", image_path);
+		return false;
+	}
+
+	FORMAT img_fmt = img.getFormat();
+	if (img_fmt != FORMAT_RGB8 && img_fmt != FORMAT_RGBA8) {
+		log_error(("Unsupported texture format when loading %s\n", image_path));
+	}
+
+	RHIImageDesc img_desc;
+	img_desc.type = RHIImageType::k2D;
+    img_desc.format = img_fmt == FORMAT_RGB8 ? RHIFormat::kR8G8B8_UNORM : RHIFormat::kR8G8B8A8_UNORM;
+    img_desc.width = img.getWidth();
+    img_desc.height = img.getHeight();
+    img_desc.depth = 1;
+    img_desc.arraySize = 1;
+    img_desc.numMips = 1;
+    img_desc.numSamples = RHISampleCount::k1Bit;
+	img_desc.tiling = RHIImageTiling::kOptimal;
+	img_desc.usage = RHIImageUsageFlagBits::SampledBit|RHIImageUsageFlagBits::TransferDstBit;
+	img_desc.sharingMode = RHISharingMode::kExclusive; // only in graphics queue
+
+	g_test_image = device->CreateImage(&img_desc, RHIImageLayout::kTransferDstOptimal,
+									   RHIMemoryPropertyFlagBits::kDeviceLocal);
+	assert(g_test_image);
+
+	g_img_staging_buf =
+		device->CreateBuffer(1024*1024*4, RHIBufferUsageFlags::kTransferSrcBit,
+							 RHIMemoryPropertyFlagBits::kHostVisible, RHISharingMode::kExclusive);
+	assert(g_img_staging_buf );
+	const uint32_t img_size = img.getWidth() * img.getHeight() * getBytesPerPixel(img.getFormat());
+	uint8_t *img_memptr = (uint8_t *)g_img_staging_buf->Map(device, 0, img_size, 0);
+	memcpy(img_memptr, img.getPixels(), img_size);
+	g_img_staging_buf->Unmap(device);
+
+	g_img_copy_event = device->CreateEvent();
+
+	RHIImageViewDesc iv_desc;
+	iv_desc.image = g_test_image;
+	iv_desc.viewType = RHIImageViewType::k2d;
+    iv_desc.format = img_desc.format;
+	iv_desc.subresourceRange.aspectMask = RHIImageAspectFlags::kColor;
+	iv_desc.subresourceRange.baseArrayLayer = 0;
+	iv_desc.subresourceRange.baseMipLevel = 0;
+	iv_desc.subresourceRange.layerCount = 1;
+	iv_desc.subresourceRange.levelCount = 1;
+
+	g_test_image_view = device->CreateImageView(&iv_desc);
+	assert(g_test_image_view);
 
 	RHIVertexInputState tri_vi_state;
 	tri_vi_state.vertexBindingDescCount = 0;
@@ -441,7 +503,7 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 
 	RHIDescriptorSetLayoutDesc dsl_desc[] = {
 		{RHIDescriptorType::kSampler, RHIShaderStageFlagBits::kFragment, 1, 0},
-		//{RHIDescriptorType::kCombinedImageSampler, RHIShaderStageFlagBits::kFragment, 1, 1},
+		{RHIDescriptorType::kCombinedImageSampler, RHIShaderStageFlagBits::kFragment, 1, 1},
 		//{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment|RHIShaderStageFlagBits::kVertex, 1, 2}
 	};
 
@@ -474,8 +536,10 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	RHIDescriptorWriteDesc desc_write_desc[4];
 	RHIDescriptorWriteDescBuilder builder(desc_write_desc, countof(desc_write_desc));
 	builder.add(g_my_ds_set0, 0, test_sampler)
+		.add(g_my_ds_set0, 1, test_sampler, RHIImageLayout::kShaderReadOnlyOptimal, g_test_image_view)
 		//.add(g_my_ds_set0, 2, g_uniform_buffer, 0, sizeof(PerFrameUniforms));
-		.add(g_my_ds_set1, 0, test_sampler2);// .add(g_my_ds_set1, 2, g_uniform_buffer, 0, sizeof(PerFrameUniforms));
+		//.add(g_my_ds_set1, 0, test_sampler2);// .add(g_my_ds_set1, 2, g_uniform_buffer, 0, sizeof(PerFrameUniforms))
+		;
 	device->UpdateDescriptorSet(desc_write_desc, builder.cur_index);
 
 	const IRHIDescriptorSetLayout* pipe_layout_desc[] = { g_my_layout, g_my_layout };
@@ -492,7 +556,7 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	if (!UVulkanRenderDevice::SetRes(NewX, NewY, NewColorBytes, Fullscreen)) {
 		GError->Log(L"Init: SetRes failed.");
 		return 0;
-}
+	}
 
 #if 0	
 	textureCache= new (std::nothrow) TextureCache(D3D::getDevice());
@@ -668,20 +732,31 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 			once = !once;
 		}
 
+		if (!g_img_copy_event->IsSet(dev)) {
+			static bool once = true;
+			assert(once);
+			cb->Barrier_UndefinedToTransfer(g_test_image);
+			cb->CopyBufferToImage2D(g_test_image, g_img_staging_buf);
+			cb->Barrier_TransferToShaderRead(g_test_image);
+			cb->SetEvent(g_img_copy_event, RHIPipelineStageFlags::kFragmentShader);
+			once = !once;
+		}
+
 		ivec4 render_area(0, 0, fb_image->Width(), fb_image->Height());
 		RHIClearValue clear_value = { vec4(0,1,0, 0), 0.0f, 0 };
 		cb->BeginRenderPass(g_main_pass, cur_fb, &render_area, &clear_value, 1);
 
-
-		const IRHIDescriptorSet* sets[] = { g_my_ds_set0, g_my_ds_set1};
+		const IRHIDescriptorSet* sets[] = { g_my_ds_set0, g_my_ds_set1 };
 		cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_tri_pipeline->Layout(), sets, countof(sets));
-
 		cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_tri_pipeline);
 		cb->Draw(3, 1, 0, 0);
 
 		// I think there is no need to wait as we schedule draw in the queue and all operations are sequential there
 		// only necessary if we want to do something on a host, but let it be here as an example
-		if (g_quad_vb_copy_event->IsSet(dev)) {
+		if (g_quad_vb_copy_event->IsSet(dev) && g_img_copy_event->IsSet(dev)) {
+
+			const IRHIDescriptorSet* sets[] = { g_my_ds_set0, g_my_ds_set1 };
+			cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_quad_pipeline->Layout(), sets, countof(sets));
 			cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_quad_pipeline);
 			cb->BindVertexBuffers(&g_quad_gpu_vb, 0, 1);
 			cb->Draw(4, 1, 0, 0);
@@ -789,6 +864,15 @@ void UVulkanRenderDevice::SetSceneNode(FSceneNode* Frame)
 {
 }
 
+/**
+Store a texture in the renderer-kept texture cache. Only called by the game if URenderDevice::PrecacheOnFlip is 1.
+\param Info Texture (meta)data. Includes a CacheID with which to index.
+\param PolyFlags Contains the correct flags for this texture. See polyflags.h
+
+\note Already cached textures are skipped, unless it's a dynamic texture, in which case it is updated.
+\note Extra care is taken to recache textures that aren't saved as masked, but now have flags indicating they should be (masking is not always properly set).
+	as this couldn't be anticipated in advance, the texture needs to be deleted and recreated.
+*/
 void UVulkanRenderDevice::PrecacheTexture(FTextureInfo& Info, DWORD PolyFlags)
 {
 }

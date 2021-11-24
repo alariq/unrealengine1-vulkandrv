@@ -61,6 +61,7 @@ RHIDescriptorWriteDescBuilder &RHIDescriptorWriteDescBuilder::add(const IRHIDesc
 																  IRHIImageView *img_view) {
 
 	assert(count_ > cur_index);
+	assert(sampler && img_view);
 	const IRHIDescriptorSetLayout *layout = ds->getLayout();
 	int count;
 	int lidx = 0;
@@ -79,7 +80,7 @@ RHIDescriptorWriteDescBuilder &RHIDescriptorWriteDescBuilder::add(const IRHIDesc
 	assert(layout_desc[lidx].count == 1);
 
 	desc_[cur_index].binding = binding;
-	desc_[cur_index].type = RHIDescriptorType::kSampler;
+	desc_[cur_index].type = RHIDescriptorType::kCombinedImageSampler;
 	desc_[cur_index].set = ds;
 	desc_[cur_index].img.sampler = sampler;
 	desc_[cur_index].img.image_layout = img_layout;

@@ -84,7 +84,7 @@ class RHIImageVk: public IRHIImage {
 	~RHIImageVk() = default;
 public:
 	//VkFormat vk_format_;
-	VkAccessFlags vk_access_flags_ = VK_ACCESS_FLAG_BITS_MAX_ENUM;
+	VkAccessFlags vk_access_flags_ = 0; // to work for undefined -> whatewer Barrier
 	VkImageLayout vk_layout_;
 
 	void Destroy(IRHIDevice *device);
@@ -270,6 +270,8 @@ public:
 	virtual void Barrier_PresentToClear(IRHIImage* image) ;
 	virtual void Barrier_PresentToDraw(IRHIImage* image) ;
 	virtual void Barrier_DrawToPresent(IRHIImage* image) ;
+	virtual void Barrier_UndefinedToTransfer(IRHIImage* image);
+	virtual void Barrier_TransferToShaderRead(IRHIImage* image);
 
 	virtual void BufferBarrier(IRHIBuffer *i_buffer, RHIAccessFlags::Value src_acc_flags,
 							   RHIPipelineStageFlags::Value src_stage, RHIAccessFlags::Value dst_acc_fags,
@@ -284,6 +286,8 @@ public:
 
 	virtual void CopyBuffer(class IRHIBuffer *dst, uint32_t dst_offset, class IRHIBuffer *src,
 							uint32_t src_offset, uint32_t size) ;
+
+	virtual void CopyBufferToImage2D(class IRHIImage *i_dst, class IRHIBuffer *i_src);
 
     virtual void SetEvent(IRHIEvent* event, RHIPipelineStageFlags::Value stage) ;
     virtual void ResetEvent(IRHIEvent* event, RHIPipelineStageFlags::Value stage) ;

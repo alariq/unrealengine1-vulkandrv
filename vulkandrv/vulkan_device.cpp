@@ -50,6 +50,7 @@ const typename ResImplType<R>::Type* ResourceCast(const R* obj) {
 VkFormat translate(RHIFormat fmt) {
 	static VkFormat formats[] = {
         VK_FORMAT_UNDEFINED,
+		VK_FORMAT_R8G8B8_UNORM,		 VK_FORMAT_R8G8B8_UINT,		  VK_FORMAT_R8G8B8_SRGB,
 		VK_FORMAT_R8G8B8A8_UNORM,	 VK_FORMAT_R8G8B8A8_UINT,	  VK_FORMAT_R8G8B8A8_SRGB,
 		VK_FORMAT_R32_UINT,			 VK_FORMAT_R32_SINT,		  VK_FORMAT_R32_SFLOAT,
 		VK_FORMAT_R32G32_UINT,		 VK_FORMAT_R32G32_SINT,		  VK_FORMAT_R32G32_SFLOAT,
@@ -63,6 +64,9 @@ VkFormat translate(RHIFormat fmt) {
 
 RHIFormat untranslate(VkFormat fmt) {
     switch(fmt) {
+        case VK_FORMAT_R8G8B8_UNORM: return RHIFormat::kR8G8B8_UNORM;
+        case VK_FORMAT_R8G8B8_UINT:return RHIFormat::kR8G8B8_UINT;
+        case VK_FORMAT_R8G8B8_SRGB:return RHIFormat::kR8G8B8_SRGB;
         case VK_FORMAT_R8G8B8A8_UNORM: return RHIFormat::kR8G8B8A8_UNORM;
         case VK_FORMAT_R8G8B8A8_UINT:return RHIFormat::kR8G8B8A8_UINT;
         case VK_FORMAT_R8G8B8A8_SRGB:return RHIFormat::kR8G8B8A8_SRGB;
@@ -1073,6 +1077,7 @@ void RHIBufferVk::Destroy(IRHIDevice* device) {
 
 void *RHIBufferVk::Map(IRHIDevice* device, uint32_t offset, uint32_t size, uint32_t map_flags) {
     assert(!is_mapped_);
+	assert(this->buf_size_ >= offset + size);
 
 	RHIDeviceVk* dev = ResourceCast(device);
 	void *ptr;
@@ -1099,7 +1104,7 @@ void RHIBufferVk::Unmap(IRHIDevice* device) {
       nullptr,                                          // const void            *pNext
       backing_mem_,                                     // VkDeviceMemory         memory
       mapped_offset_,                                   // VkDeviceSize           offset
-      mapped_size_                                      // VkDeviceSize           size
+      VK_WHOLE_SIZE,//  mapped_size_                                      // VkDeviceSize           size
     };
 	vkFlushMappedMemoryRanges(dev->Handle(), 1, &flush_range);
 
@@ -1195,7 +1200,7 @@ void Barrier(VkCommandBuffer cb, RHIImageVk* image,
 			 VkPipelineStageFlags dst_pipeline_stage_bits, VkAccessFlags new_access_flags,
 			 VkImageLayout new_layout) {
 
-	// TODO: incorporate this int oparameters, or use image view somehow and gfrab it from that
+	// TODO: incorporate this int oparameters, or use image view somehow and grab it from that
 	VkImageSubresourceRange image_subresource_range = {
 		VK_IMAGE_ASPECT_COLOR_BIT, // VkImageAspectFlags                     aspectMask
 		0,						   // uint32_t                               baseMipLevel
@@ -1222,7 +1227,7 @@ void Barrier(VkCommandBuffer cb, RHIImageVk* image,
 	vkCmdPipelineBarrier(cb, src_pipeline_stage_bits, dst_pipeline_stage_bits, 0, 0,
 						 nullptr, 0, nullptr, 1, &barrier_copy2present);
 
-	// warning: updating states like this is not always correct if we have differect CBs and submit
+	// warning: updating states like this is not always correct if we have different CBs and submit
 	// them in different order
 	image->vk_access_flags_ = new_access_flags;
 	image->vk_layout_ = new_layout;
@@ -1391,6 +1396,42 @@ void RHICmdBufVk::CopyBuffer(class IRHIBuffer *i_dst, uint32_t dst_offset, class
     vkCmdCopyBuffer(cb_, src->Handle(), dst->Handle(), 1, &buffer_copy_info );
 }
 
+// just assumes should copy full image
+void RHICmdBufVk::CopyBufferToImage2D(class IRHIImage*i_dst, class IRHIBuffer *i_src) {
+
+	const RHIImageVk* img = ResourceCast(i_dst);
+	const RHIBufferVk* buf = ResourceCast(i_src);
+
+	VkBufferImageCopy buffer_image_copy_info = {
+		0, // VkDeviceSize               bufferOffset
+		0, // uint32_t                   bufferRowLength
+		0, // uint32_t                   bufferImageHeight
+		{
+			// VkImageSubresourceLayers   imageSubresource
+			VK_IMAGE_ASPECT_COLOR_BIT, // VkImageAspectFlags         aspectMask
+			0,						   // uint32_t                   mipLevel
+			0,						   // uint32_t                   baseArrayLayer
+			1						   // uint32_t                   layerCount
+		},
+		{
+			// VkOffset3D                 imageOffset
+			0, // int32_t                    x
+			0, // int32_t                    y
+			0  // int32_t                    z
+		},
+		{
+			// VkExtent3D                 imageExtent
+			img->Width(),  // uint32_t                   width
+			img->Height(), // uint32_t                   height
+			1			   // uint32_t                   depth
+		}
+	};
+
+	assert(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL == img->vk_layout_);
+	vkCmdCopyBufferToImage(cb_, buf->Handle(), img->Handle(), img->vk_layout_, 1, &buffer_image_copy_info);
+}
+
+
 void RHICmdBufVk::SetEvent(IRHIEvent* i_event, RHIPipelineStageFlags::Value stage) {
     const RHIEventVk* event = ResourceCast(i_event); 
     vkCmdSetEvent(cb_, event->Handle(), translate_ps(stage));
@@ -1434,6 +1475,7 @@ void RHICmdBufVk::Barrier_PresentToClear(IRHIImage *image_in) {
 			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 }
 
+// FIXME: check if VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL is correct here
 void RHICmdBufVk::Barrier_PresentToDraw(IRHIImage *image_in) {
 	RHIImageVk* image = ResourceCast(image_in);
 	Barrier(this->Handle(), image, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -1446,6 +1488,26 @@ void RHICmdBufVk::Barrier_DrawToPresent(IRHIImage *image_in) {
 	Barrier(this->Handle(), image, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_ACCESS_MEMORY_READ_BIT,
 			VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+}
+
+void RHICmdBufVk::Barrier_UndefinedToTransfer(IRHIImage *image_in) {
+	RHIImageVk* image = ResourceCast(image_in);
+
+	Barrier(this->Handle(), image, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+}
+
+// NOTE: Fragment shader read!
+void RHICmdBufVk::Barrier_TransferToShaderRead(IRHIImage *image_in) {
+	RHIImageVk* image = ResourceCast(image_in);
+
+	assert(image->vk_access_flags_ = VK_ACCESS_TRANSFER_WRITE_BIT);
+	assert(image->vk_layout_ = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+	Barrier(this->Handle(), image, VK_PIPELINE_STAGE_TRANSFER_BIT,
+			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 
@@ -1951,7 +2013,7 @@ void RHIDeviceVk::UpdateDescriptorSet(const RHIDescriptorWriteDesc *desc, int co
 			assert(desc[i].img.sampler && desc[i].img.image_view);
 			VkSampler sampler = ResourceCast(desc[i].img.sampler)->Handle();
 			VkImageView view = ResourceCast(desc[i].img.image_view)->Handle();
-			image_info[ii_idx] = { sampler, view, translate_il(RHIImageLayout::kUndefined) };
+			image_info[ii_idx] = { sampler, view, translate_il(desc[i].img.image_layout) };
 			write_desc[i] =
 				fill_write_desc_set_image(vk_type, vk_set, desc[i].binding, &image_info[ii_idx], 1);
 			ii_idx++;

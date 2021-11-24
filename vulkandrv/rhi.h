@@ -31,6 +31,11 @@ struct RHIQueueType { enum Value: uint32_t {
 #if defined(USE_Format_TRANSLATION)
 enum class RHIFormat : uint32_t {
     kUNDEFINED = 0,
+
+	kR8G8B8_UNORM,
+	kR8G8B8_UINT,
+	kR8G8B8_SRGB,
+
 	kR8G8B8A8_UNORM ,
 	kR8G8B8A8_UINT,
 	kR8G8B8A8_SRGB,
@@ -742,6 +747,8 @@ public:
 	virtual void CopyBuffer(class IRHIBuffer *dst, uint32_t dst_offset, class IRHIBuffer *src,
 							uint32_t src_offset, uint32_t size) = 0;
 
+    virtual void CopyBufferToImage2D(class IRHIImage *i_dst, class IRHIBuffer *i_src) = 0;
+
     virtual void SetEvent(IRHIEvent* event, RHIPipelineStageFlags::Value stage) = 0;
     virtual void ResetEvent(IRHIEvent* event, RHIPipelineStageFlags::Value stage) = 0;
     //TODO: implement
@@ -758,6 +765,9 @@ public:
 	virtual void Barrier_PresentToClear(IRHIImage* image) = 0;
 	virtual void Barrier_PresentToDraw(IRHIImage* image) = 0;
 	virtual void Barrier_DrawToPresent(IRHIImage* image) = 0;
+	virtual void Barrier_UndefinedToTransfer(IRHIImage *image) = 0;
+	virtual void Barrier_TransferToShaderRead(IRHIImage *image) = 0;
+
 	virtual void Clear(IRHIImage* image_in, const vec4& color, uint32_t img_aspect_bits) = 0;
 	virtual ~IRHICmdBuf() = 0;
 };
