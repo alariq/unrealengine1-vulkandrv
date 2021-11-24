@@ -6,7 +6,8 @@
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">
-    <LocalDebuggerCommandArguments>-log</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>
+    </LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
     <LocalDebuggerCommand>d:\ut1999\System\UnrealTournament.exe</LocalDebuggerCommand>
   </PropertyGroup>
