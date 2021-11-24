@@ -1005,7 +1005,7 @@ IRHIShader* RHIDeviceVk::CreateShader(RHIShaderStageFlagBits::Value stage, const
 
 
 ////////////// Buffer //////////////////////////////////////////////////
-RHIBufferVk* RHIBufferVk::Create(IRHIDevice* device, uint32_t size, uint32_t usage, uint32_t memprop, RHISharingMode::Value sharing) {
+RHIBufferVk* RHIBufferVk::Create(IRHIDevice* device, uint32_t size, uint32_t usage, uint32_t memprops, RHISharingMode::Value sharing) {
     VkBufferCreateInfo buffer_create_info = {
         VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,             // VkStructureType        sType
         nullptr,                                          // const void            *pNext
@@ -1032,7 +1032,7 @@ RHIBufferVk* RHIBufferVk::Create(IRHIDevice* device, uint32_t size, uint32_t usa
     vkGetPhysicalDeviceMemoryProperties(dev->PhysDeviceHandle(), &memory_properties );
 
     VkDeviceMemory vk_mem = VK_NULL_HANDLE;
-    VkMemoryPropertyFlags vk_memprop = translate_mem_prop(memprop);
+    VkMemoryPropertyFlags vk_memprop = translate_mem_prop(memprops);
 	for (uint32_t i = 0; i < memory_properties.memoryTypeCount; ++i) {
 		if ((buffer_memory_req.memoryTypeBits & (1 << i)) &&
 			(memory_properties.memoryTypes[i].propertyFlags & vk_memprop)) {
@@ -1062,7 +1062,7 @@ RHIBufferVk* RHIBufferVk::Create(IRHIDevice* device, uint32_t size, uint32_t usa
     buffer->backing_mem_ = vk_mem;
     buffer->buf_size_ = size;
     buffer->usage_flags_ = usage;
-    buffer->mem_flags_ = memprop;
+    buffer->mem_flags_ = memprops;
     buffer->is_mapped_ = false;
 
     return buffer;
@@ -1077,18 +1077,21 @@ void RHIBufferVk::Destroy(IRHIDevice* device) {
 
 void *RHIBufferVk::Map(IRHIDevice* device, uint32_t offset, uint32_t size, uint32_t map_flags) {
     assert(!is_mapped_);
-	assert(this->buf_size_ >= offset + size);
+	assert((size==(uint32_t)-1U && offset==0) || this->buf_size_ >= offset + size);
+	assert(this->mem_flags_ & RHIMemoryPropertyFlagBits::kHostVisible);
+
+	uint32_t map_size = size == (uint32_t)-1U ? this->buf_size_ : size;
 
 	RHIDeviceVk* dev = ResourceCast(device);
 	void *ptr;
-	if (vkMapMemory(dev->Handle(), backing_mem_, offset, size, map_flags, &ptr) != VK_SUCCESS) {
+	if (vkMapMemory(dev->Handle(), backing_mem_, offset, map_size, map_flags, &ptr) != VK_SUCCESS) {
 		log_error("Could not map memory and upload data to a vertex buffer!\n");
 		return nullptr;
 	}
 
     is_mapped_ = true;
     mapped_offset_ = offset;
-    mapped_size_ = size;
+    mapped_size_ = map_size;
     mapped_flags_ = map_flags;
 
     return ptr;
@@ -1104,7 +1107,7 @@ void RHIBufferVk::Unmap(IRHIDevice* device) {
       nullptr,                                          // const void            *pNext
       backing_mem_,                                     // VkDeviceMemory         memory
       mapped_offset_,                                   // VkDeviceSize           offset
-      VK_WHOLE_SIZE,//  mapped_size_                                      // VkDeviceSize           size
+      mapped_size_                                      // VkDeviceSize           size
     };
 	vkFlushMappedMemoryRanges(dev->Handle(), 1, &flush_range);
 

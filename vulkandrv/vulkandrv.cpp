@@ -54,6 +54,7 @@ struct SimpleVertex {
     vec2 uv;
 };
 struct PerFrameUniforms {
+	vec4 stuff;
 	mat4 camera;
 };
 
@@ -82,6 +83,7 @@ static IRHICmdBuf* g_cmdbuf[kNumBufferedFrames] = { 0 };
 IRHIBuffer* g_quad_gpu_vb = nullptr;
 IRHIBuffer* g_quad_staging_vb = nullptr;
 IRHIEvent* g_quad_vb_copy_event= nullptr;	
+
 IRHIRenderPass* g_main_pass = nullptr;
 std::vector<IRHIFrameBuffer*> g_main_fb;
 
@@ -89,6 +91,9 @@ IRHIGraphicsPipeline *g_tri_pipeline = nullptr;
 IRHIGraphicsPipeline *g_quad_pipeline = nullptr;
 
 IRHIBuffer* g_uniform_buffer = 0;
+IRHIBuffer* g_uniform_staging_buffer = 0;
+IRHIEvent* g_uniform_buffer_copy_event = nullptr;	
+
 IRHIDescriptorSetLayout* g_my_layout = 0;
 IRHIDescriptorSet* g_my_ds_set0 = 0;
 IRHIDescriptorSet* g_my_ds_set1 = 0;
@@ -504,7 +509,7 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	RHIDescriptorSetLayoutDesc dsl_desc[] = {
 		{RHIDescriptorType::kSampler, RHIShaderStageFlagBits::kFragment, 1, 0},
 		{RHIDescriptorType::kCombinedImageSampler, RHIShaderStageFlagBits::kFragment, 1, 1},
-		//{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment|RHIShaderStageFlagBits::kVertex, 1, 2}
+		{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment | RHIShaderStageFlagBits::kVertex, 1, 2}
 	};
 
 	RHISamplerDesc sampler_desc;
@@ -525,9 +530,23 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	IRHISampler* test_sampler = device->CreateSampler(sampler_desc);
 	IRHISampler* test_sampler2 = device->CreateSampler(sampler_desc);
 
-	g_uniform_buffer =
-		device->CreateBuffer(sizeof(PerFrameUniforms), RHIBufferUsageFlags::kUniformBufferBit,
+	g_uniform_buffer = device->CreateBuffer(
+		sizeof(PerFrameUniforms),
+		RHIBufferUsageFlags::kUniformBufferBit | RHIBufferUsageFlags::kTransferDstBit,
 							 RHIMemoryPropertyFlagBits::kDeviceLocal, RHISharingMode::kExclusive);
+
+	g_uniform_staging_buffer = device->CreateBuffer(
+		sizeof(PerFrameUniforms),
+		RHIBufferUsageFlags::kTransferSrcBit,
+		RHIMemoryPropertyFlagBits::kHostVisible, RHISharingMode::kExclusive);
+
+	PerFrameUniforms* uniptr = (PerFrameUniforms*)g_uniform_staging_buffer->Map(device, 0, -1, 0);
+	uniptr->stuff = vec4(1, -2, 3, -3.1415f);
+	uniptr->camera = mat4::rotationZ(45.0f * M_PI / 180.0f);
+	// no need to unmap in vulkan (but we flush in unmap, maybe move it to the separate function)
+	g_uniform_staging_buffer->Unmap(device);
+
+	g_uniform_buffer_copy_event = device->CreateEvent();
 
 	g_my_layout = device->CreateDescriptorSetLayout(dsl_desc, countof(dsl_desc));
 	g_my_ds_set0 = device->AllocateDescriptorSet(g_my_layout);
@@ -537,7 +556,7 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	RHIDescriptorWriteDescBuilder builder(desc_write_desc, countof(desc_write_desc));
 	builder.add(g_my_ds_set0, 0, test_sampler)
 		.add(g_my_ds_set0, 1, test_sampler, RHIImageLayout::kShaderReadOnlyOptimal, g_test_image_view)
-		//.add(g_my_ds_set0, 2, g_uniform_buffer, 0, sizeof(PerFrameUniforms));
+		.add(g_my_ds_set0, 2, g_uniform_buffer, 0, sizeof(PerFrameUniforms));
 		//.add(g_my_ds_set1, 0, test_sampler2);// .add(g_my_ds_set1, 2, g_uniform_buffer, 0, sizeof(PerFrameUniforms))
 		;
 	device->UpdateDescriptorSet(desc_write_desc, builder.cur_index);
@@ -751,11 +770,17 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 		cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_tri_pipeline);
 		cb->Draw(3, 1, 0, 0);
 
+		// update uniforms
+		cb->CopyBuffer(g_uniform_buffer, 0, g_uniform_staging_buffer, 0, sizeof(PerFrameUniforms));
+		cb->BufferBarrier(g_uniform_buffer, RHIAccessFlags::kTransferWrite,
+						  RHIPipelineStageFlags::kTransfer, RHIAccessFlags::kUniformRead,
+						  RHIPipelineStageFlags::kVertexShader);
+		cb->SetEvent(g_uniform_buffer_copy_event, RHIPipelineStageFlags::kVertexShader);
+
 		// I think there is no need to wait as we schedule draw in the queue and all operations are sequential there
 		// only necessary if we want to do something on a host, but let it be here as an example
-		if (g_quad_vb_copy_event->IsSet(dev) && g_img_copy_event->IsSet(dev)) {
+		if (g_quad_vb_copy_event->IsSet(dev) && g_img_copy_event->IsSet(dev) && g_uniform_buffer_copy_event->IsSet(dev)) {
 
-			const IRHIDescriptorSet* sets[] = { g_my_ds_set0, g_my_ds_set1 };
 			cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_quad_pipeline->Layout(), sets, countof(sets));
 			cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_quad_pipeline);
 			cb->BindVertexBuffers(&g_quad_gpu_vb, 0, 1);
