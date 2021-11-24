@@ -239,14 +239,14 @@ VkSampleCountFlagBits translate_sc(RHISampleCount::Value type) {
 
 VkImageUsageFlags  translate_image_usage_flags(uint32_t image_usage_flags) {
 	VkImageUsageFlags  f = 0;
-	f = (image_usage_flags & RHIImageUsageFlagBits::TransferSrcBit) ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0;
-	f = (image_usage_flags & RHIImageUsageFlagBits::TransferDstBit) ? VK_IMAGE_USAGE_TRANSFER_DST_BIT : 0;
-	f = (image_usage_flags & RHIImageUsageFlagBits::SampledBit) ? VK_IMAGE_USAGE_SAMPLED_BIT : 0;
-	f = (image_usage_flags & RHIImageUsageFlagBits::StorageBit) ? VK_IMAGE_USAGE_STORAGE_BIT : 0;
-	f = (image_usage_flags & RHIImageUsageFlagBits::ColorAttachmentBit) ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0;
-	f = (image_usage_flags & RHIImageUsageFlagBits::DepthStencilAttachmentBit) ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : 0;
-	f = (image_usage_flags & RHIImageUsageFlagBits::TransientAttachmentBit) ? VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT : 0;
-	f = (image_usage_flags & RHIImageUsageFlagBits::InputAttachmentBit) ? VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT : 0;
+	f |= (image_usage_flags & RHIImageUsageFlagBits::TransferSrcBit) ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0;
+	f |= (image_usage_flags & RHIImageUsageFlagBits::TransferDstBit) ? VK_IMAGE_USAGE_TRANSFER_DST_BIT : 0;
+	f |= (image_usage_flags & RHIImageUsageFlagBits::SampledBit) ? VK_IMAGE_USAGE_SAMPLED_BIT : 0;
+	f |= (image_usage_flags & RHIImageUsageFlagBits::StorageBit) ? VK_IMAGE_USAGE_STORAGE_BIT : 0;
+	f |= (image_usage_flags & RHIImageUsageFlagBits::ColorAttachmentBit) ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0;
+	f |= (image_usage_flags & RHIImageUsageFlagBits::DepthStencilAttachmentBit) ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : 0;
+	f |= (image_usage_flags & RHIImageUsageFlagBits::TransientAttachmentBit) ? VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT : 0;
+	f |= (image_usage_flags & RHIImageUsageFlagBits::InputAttachmentBit) ? VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT : 0;
 	return f;
 }
 
