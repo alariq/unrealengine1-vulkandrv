@@ -7,7 +7,7 @@ layout(set=0, binding=0) uniform sampler2D my_sampler;
 layout(set=0, binding=1) uniform sampler2D Texture;
 layout(set=0, binding=2) uniform PerFrameData_t {
     vec4 stuff;
-    mat4 camera;
+    mat4 fake_camera;
 } PerFrameData;
 
 layout(location = 0) out vec4 o_Color;

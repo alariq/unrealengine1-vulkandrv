@@ -17,6 +17,7 @@
 #include "utils/macros.h"
 #include "utils/file_utils.h"
 #include "utils/Image.h"
+#include "utils/mesh_utils.h"
 //#include "texconverter.h"
 //#include "customflags.h"
 #include "misc.h"
@@ -55,11 +56,19 @@ struct SimpleVertex {
 };
 struct PerFrameUniforms {
 	vec4 stuff;
-	mat4 camera;
+	mat4 fake_camera;
+	mat4 world;
+	mat4 view;
+	mat4 proj;
+	mat4 normal_tr;
+	mat4 vwp;
 };
 
 RHIVertexInputBindingDesc vert_bindings_desc[] = {
 	{0, sizeof(SimpleVertex), RHIVertexInputRate::kVertex}};
+
+RHIVertexInputBindingDesc svd_vert_bindings_desc[] = {
+	{0, sizeof(SVD), RHIVertexInputRate::kVertex}};
 
 RHIVertexInputAttributeDesc va_desc[] = {
 	{0, vert_bindings_desc[0].binding, RHIFormat::kR32G32B32A32_SFLOAT,
@@ -68,6 +77,14 @@ RHIVertexInputAttributeDesc va_desc[] = {
 	 offsetof(SimpleVertex, color)},
 	{2, vert_bindings_desc[0].binding, RHIFormat::kR32G32_SFLOAT,
 	 offsetof(SimpleVertex, uv)}};
+
+RHIVertexInputAttributeDesc world_model_va_desc[] = {
+	{0, svd_vert_bindings_desc[0].binding, RHIFormat::kR32G32B32_SFLOAT,
+	 offsetof(SVD, pos)},
+	{1, svd_vert_bindings_desc[0].binding, RHIFormat::kR32G32B32_SFLOAT,
+	 offsetof(SVD, normal)},
+	{2, svd_vert_bindings_desc[0].binding, RHIFormat::kR32G32_SFLOAT,
+	 offsetof(SVD, uv)}};
 
 // Create Test Vertex Buffer
 SimpleVertex vb[] = {{{-0.55f, -0.55f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
@@ -82,16 +99,109 @@ static IRHICmdBuf* g_cmdbuf[kNumBufferedFrames] = { 0 };
 
 IRHIBuffer* g_quad_gpu_vb = nullptr;
 IRHIBuffer* g_quad_staging_vb = nullptr;
-IRHIEvent* g_quad_vb_copy_event= nullptr;	
+IRHIEvent* g_quad_vb_copy_event= nullptr;
+
+struct SBuffer {
+	enum BufType_t { kUnknown = 0, kIB = 1, kVB = 2, kUni = 3 };
+
+	IRHIBuffer* device_buf_ = nullptr;
+	IRHIBuffer* staging_buf_ = nullptr;
+	IRHIEvent* copy_event_ = nullptr;
+	BufType_t type_ = kUnknown;
+
+	static SBuffer* makeIB(IRHIDevice* dev, uint32_t size, const void* data) {
+		SBuffer* b = make(dev, size, RHIBufferUsageFlagBits::kIndexBufferBit, data);
+		b->type_ = kIB;
+		return b;
+	}
+
+	static SBuffer* makeVB(IRHIDevice* dev, uint32_t size, const void* data) {
+		SBuffer* b = make(dev, size, RHIBufferUsageFlagBits::kVertexBufferBit, data);
+		b->type_ = kVB;
+		return b;
+	}
+
+	static SBuffer* make(IRHIDevice* dev, uint32_t size, uint32_t usage, const void* data) {
+		SBuffer* buf = new SBuffer();
+
+		buf->device_buf_ = dev->CreateBuffer(
+			size, RHIBufferUsageFlagBits::kTransferDstBit | usage,
+			RHIMemoryPropertyFlagBits::kDeviceLocal, RHISharingMode::kExclusive);
+		assert(buf->device_buf_);
+
+		buf->staging_buf_ = dev->CreateBuffer(size, RHIBufferUsageFlagBits::kTransferSrcBit,
+							 RHIMemoryPropertyFlagBits::kHostVisible, RHISharingMode::kExclusive);
+		assert(buf->staging_buf_);
+
+		if (data) {
+			uint8_t* memptr = (uint8_t*)buf->staging_buf_->Map(dev, 0, size, 0);
+			memcpy(memptr, data, size);
+			buf->staging_buf_->Unmap(dev);
+		}
+
+		buf->copy_event_ = dev->CreateEvent();
+
+		return buf;
+	}
+
+	void CopyToGPU(IRHIDevice* dev, IRHICmdBuf* cb) {
+		if (!copy_event_->IsSet(dev)) {
+			cb->CopyBuffer(device_buf_, 0, staging_buf_, 0, staging_buf_->Size());
+			RHIAccessFlags dst_acc_flags;
+			RHIPipelineStageFlags::Value dst_pipe_stage;
+			switch (type_) {
+			case kIB: 
+				dst_acc_flags = RHIAccessFlagBits::kIndexRead;
+				dst_pipe_stage = RHIPipelineStageFlags::kVertexInput;
+				break;
+			case kVB: 
+				dst_acc_flags = RHIAccessFlagBits::kVertexAttributeRead;
+				dst_pipe_stage = RHIPipelineStageFlags::kVertexInput;
+				break;
+			default:
+				assert(!"Wrong buffer type, TODO: add case for uniform buffer");
+			};
+			cb->BufferBarrier(device_buf_, (uint32_t)RHIAccessFlagBits::kTransferWrite,
+							  RHIPipelineStageFlags::kTransfer, dst_acc_flags, dst_pipe_stage);
+			cb->SetEvent(copy_event_, dst_pipe_stage);
+		}
+	}
+
+	bool IsReady(IRHIDevice* dev) const { return copy_event_->IsSet(dev); }
+};
+
+
+struct SShader {
+
+	RHIShaderStage stages_[2];
+
+	static SShader* load(IRHIDevice* dev, const char* vs, const char* fs) {
+		size_t vs_size;
+		const uint32_t* vs_data = (uint32_t*)filesystem::loadfile(vs, &vs_size);
+		size_t ps_size;
+		const uint32_t* ps_data = (uint32_t*)filesystem::loadfile(fs, &ps_size);
+
+		SShader* sh = new SShader();
+
+		sh->stages_[0].module = dev->CreateShader(RHIShaderStageFlagBits::kVertex, vs_data, vs_size);
+		sh->stages_[0].pEntryPointName = "main";
+		sh->stages_[0].stage = RHIShaderStageFlagBits::kVertex;
+		sh->stages_[1].module = dev->CreateShader(RHIShaderStageFlagBits::kFragment, ps_data, ps_size);
+		sh->stages_[1].pEntryPointName = "main";
+		sh->stages_[1].stage = RHIShaderStageFlagBits::kFragment;
+		return sh;
+	}
+};
 
 IRHIRenderPass* g_main_pass = nullptr;
 std::vector<IRHIFrameBuffer*> g_main_fb;
 
 IRHIGraphicsPipeline *g_tri_pipeline = nullptr;
 IRHIGraphicsPipeline *g_quad_pipeline = nullptr;
+IRHIGraphicsPipeline *g_world_model_pipeline = nullptr;
 
 IRHIBuffer* g_uniform_buffer = 0;
-IRHIBuffer* g_uniform_staging_buffer = 0;
+IRHIBuffer* g_uniform_staging_buffer[kNumBufferedFrames] = {0};
 IRHIEvent* g_uniform_buffer_copy_event = nullptr;	
 
 IRHIDescriptorSetLayout* g_my_layout = 0;
@@ -102,8 +212,38 @@ IRHIImage* g_test_image = 0;
 IRHIImageView* g_test_image_view = 0;
 // temp buffer to store image data before copying to gpu mem
 IRHIBuffer* g_img_staging_buf = 0;
-IRHIEvent* g_img_copy_event= nullptr;	
+IRHIEvent* g_img_copy_event = nullptr;
 
+SBuffer* g_cube_ib = nullptr;
+SBuffer* g_cube_vb = nullptr;
+SShader* g_cube_shader = nullptr;
+
+
+void update_uniform_staging_buf(int idx, IRHIDevice* dev) {
+	assert(idx >= 0 && idx < kNumBufferedFrames);
+
+	PerFrameUniforms* uniptr = (PerFrameUniforms*)g_uniform_staging_buffer[idx]->Map(dev, 0, -1, 0);
+	uniptr->stuff = vec4(1, -2, 3, -3.1415f);
+	uniptr->fake_camera = mat4::rotationZ(45.0f * M_PI / 180.0f);
+	static float angle = 30.0f * M_PI / 180.0f;
+	angle += .2f * M_PI / 180.0f;
+	uniptr->world = mat4::rotationY(angle) * mat4::rotationX(angle) *mat4::scale(vec3(0.5f));
+	uniptr->view = lookAt(vec3(0, 0, -5), vec3(0, 0, 0));
+	const float w = (float)dev->GetSwapChainImage(0)->Width();
+	const float h = (float)dev->GetSwapChainImage(0)->Height();
+	//uniptr->proj = frustumProjMatrix(-w / 2.0f, w / 2.0f, -h / 2.0f, h / 2.0f, 0.1f, 100.0f);
+	uniptr->proj = perspectiveMatrixX(45.0f * M_PI / 180.0f, w, h, 1.0f, 100.0f, false);
+	uniptr->vwp = uniptr->proj * uniptr->view * uniptr->world;
+	mat4 vw = uniptr->view * uniptr->world;
+	mat3 vw3(vw.getRow(0).xyz(), vw.getRow(1).xyz(), vw.getRow(2).xyz());
+	uniptr->normal_tr.setRow(0, vec4(vw3.getRow(0), 0));
+	uniptr->normal_tr.setRow(1, vec4(vw3.getRow(1), 0));
+	uniptr->normal_tr.setRow(2, vec4(vw3.getRow(2), 0));
+	uniptr->normal_tr.setRow(3, vec4(0,0,0,1));
+
+	// no need to unmap in vulkan (but we flush in unmap, maybe move it to the separate function)
+	g_uniform_staging_buffer[idx]->Unmap(dev);
+}
 
 /**
 Attempts to read a property from the game's config file; on failure, a default is written (so it can be changed by the user) and returned.
@@ -272,12 +412,19 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	}
 	g_curCBIdx = 0;
 
+	SVDAdapter<> cube_data;
+	generate_cube(cube_data, vec3(1), vec3(0.0f));
+	//g_cube_ib = SBuffer::makeIB(device, 36 * sizeof(uint16_t), 0);
+	g_cube_vb = SBuffer::makeVB(device, 36 * sizeof(SVD), cube_data.vb_);
+	g_cube_shader = SShader::load(device, "vulkandrv/spir-v-world-model.vert.spv.bin",
+								  "vulkandrv/spir-v-world-model.frag.spv.bin");
+
 	g_quad_staging_vb =
-		device->CreateBuffer(sizeof(vb), RHIBufferUsageFlags::kTransferSrcBit,
+		device->CreateBuffer(sizeof(vb), RHIBufferUsageFlagBits::kTransferSrcBit,
 							 RHIMemoryPropertyFlagBits::kHostVisible, RHISharingMode::kExclusive);
 
 	g_quad_gpu_vb = device->CreateBuffer(
-		sizeof(vb), RHIBufferUsageFlags::kVertexBufferBit | RHIBufferUsageFlags::kTransferDstBit,
+		sizeof(vb), RHIBufferUsageFlagBits::kVertexBufferBit | RHIBufferUsageFlagBits::kTransferDstBit,
 		RHIMemoryPropertyFlagBits::kDeviceLocal, RHISharingMode::kExclusive);
 
 	assert(g_quad_gpu_vb);
@@ -315,8 +462,8 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	sp_dep0.dstSubpass = 0;
 	sp_dep0.srcStageMask = RHIPipelineStageFlags::kBottomOfPipe;
 	sp_dep0.dstStageMask = RHIPipelineStageFlags::kColorAttachmentOutput;
-	sp_dep0.srcAccessMask = RHIAccessFlags::kMemoryRead;
-	sp_dep0.dstAccessMask = RHIAccessFlags::kColorAttachmentWrite;
+	sp_dep0.srcAccessMask = RHIAccessFlagBits::kMemoryRead;
+	sp_dep0.dstAccessMask = RHIAccessFlagBits::kColorAttachmentWrite;
 	sp_dep0.dependencyFlags = (uint32_t)RHIDependencyFlags::kByRegion;
 
 	RHISubpassDependency sp_dep1;
@@ -324,8 +471,8 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	sp_dep1.dstSubpass = kSubpassExternal;
 	sp_dep1.srcStageMask = RHIPipelineStageFlags::kColorAttachmentOutput;
 	sp_dep1.dstStageMask = RHIPipelineStageFlags::kBottomOfPipe;
-	sp_dep1.srcAccessMask = RHIAccessFlags::kColorAttachmentWrite;
-	sp_dep1.dstAccessMask = RHIAccessFlags::kMemoryRead;
+	sp_dep1.srcAccessMask = RHIAccessFlagBits::kColorAttachmentWrite;
+	sp_dep1.dstAccessMask = RHIAccessFlagBits::kMemoryRead;
 	sp_dep1.dependencyFlags = (uint32_t)RHIDependencyFlags::kByRegion;
 
 	RHISubpassDependency sp_deps[] = { sp_dep0, sp_dep1 };
@@ -410,7 +557,7 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	assert(g_test_image);
 
 	g_img_staging_buf =
-		device->CreateBuffer(1024*1024*4, RHIBufferUsageFlags::kTransferSrcBit,
+		device->CreateBuffer(1024*1024*4, RHIBufferUsageFlagBits::kTransferSrcBit,
 							 RHIMemoryPropertyFlagBits::kHostVisible, RHISharingMode::kExclusive);
 	assert(g_img_staging_buf );
 	const uint32_t img_size = img.getWidth() * img.getHeight() * getBytesPerPixel(img.getFormat());
@@ -445,6 +592,12 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	quad_vi_state.vertexAttributeDescCount = countof(va_desc);
 	quad_vi_state.pVertexAttributeDesc = va_desc;
 
+	RHIVertexInputState world_model_vi_state;
+	world_model_vi_state.vertexBindingDescCount = countof(svd_vert_bindings_desc);
+	world_model_vi_state.pVertexBindingDesc = svd_vert_bindings_desc;
+	world_model_vi_state.vertexAttributeDescCount = countof(world_model_va_desc);
+	world_model_vi_state.pVertexAttributeDesc = world_model_va_desc;
+
 	RHIInputAssemblyState tri_ia_state;
 	tri_ia_state.primitiveRestartEnable = false;
 	tri_ia_state.topology = RHIPrimitiveTopology::kTriangleList;
@@ -452,6 +605,10 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	RHIInputAssemblyState quad_ia_state;
 	quad_ia_state.primitiveRestartEnable = false;
 	quad_ia_state.topology = RHIPrimitiveTopology::kTriangleStrip;
+
+	RHIInputAssemblyState tris_ia_state;
+	tris_ia_state.primitiveRestartEnable = false;
+	tris_ia_state.topology = RHIPrimitiveTopology::kTriangleList;
 
 	RHIScissor scissors;
 	scissors.x = 0;
@@ -483,6 +640,9 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	raster_state.lineWidth = 1.0f;
 	raster_state.polygonMode = RHIPolygonMode::kFill;
 	raster_state.rasterizerDiscardEnable = false;
+
+	RHIRasterizationState world_model_raster_state = raster_state;
+	world_model_raster_state.frontFace = RHIFrontFace::kCounterClockwise;
 
 	RHIMultisampleState ms_state;
 	ms_state.alphaToCoverageEnable = false;
@@ -532,20 +692,16 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 
 	g_uniform_buffer = device->CreateBuffer(
 		sizeof(PerFrameUniforms),
-		RHIBufferUsageFlags::kUniformBufferBit | RHIBufferUsageFlags::kTransferDstBit,
+		RHIBufferUsageFlagBits::kUniformBufferBit | RHIBufferUsageFlagBits::kTransferDstBit,
 							 RHIMemoryPropertyFlagBits::kDeviceLocal, RHISharingMode::kExclusive);
 
-	g_uniform_staging_buffer = device->CreateBuffer(
-		sizeof(PerFrameUniforms),
-		RHIBufferUsageFlags::kTransferSrcBit,
-		RHIMemoryPropertyFlagBits::kHostVisible, RHISharingMode::kExclusive);
-
-	PerFrameUniforms* uniptr = (PerFrameUniforms*)g_uniform_staging_buffer->Map(device, 0, -1, 0);
-	uniptr->stuff = vec4(1, -2, 3, -3.1415f);
-	uniptr->camera = mat4::rotationZ(45.0f * M_PI / 180.0f);
-	// no need to unmap in vulkan (but we flush in unmap, maybe move it to the separate function)
-	g_uniform_staging_buffer->Unmap(device);
-
+	for (int i = 0; i < countof(g_uniform_staging_buffer); ++i) {
+		g_uniform_staging_buffer[i] = device->CreateBuffer(
+			sizeof(PerFrameUniforms),
+			RHIBufferUsageFlagBits::kTransferSrcBit,
+			RHIMemoryPropertyFlagBits::kHostVisible, RHISharingMode::kExclusive);
+			update_uniform_staging_buf(i, device);
+	}
 	g_uniform_buffer_copy_event = device->CreateEvent();
 
 	g_my_layout = device->CreateDescriptorSetLayout(dsl_desc, countof(dsl_desc));
@@ -571,6 +727,10 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	g_quad_pipeline = device->CreateGraphicsPipeline(
 		&quad_shader_stage[0], countof(quad_shader_stage), &quad_vi_state, &quad_ia_state,
 		&viewport_state, &raster_state, &ms_state, &blend_state, pipeline_layout, g_main_pass);
+
+	g_world_model_pipeline = device->CreateGraphicsPipeline(
+		g_cube_shader->stages_, countof(g_cube_shader->stages_), &world_model_vi_state, &tris_ia_state,
+		&viewport_state, &world_model_raster_state, &ms_state, &blend_state, pipeline_layout, g_main_pass);
 
 	if (!UVulkanRenderDevice::SetRes(NewX, NewY, NewColorBytes, Fullscreen)) {
 		GError->Log(L"Init: SetRes failed.");
@@ -745,8 +905,8 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 			assert(once);
 			cb->CopyBuffer(g_quad_gpu_vb, 0, g_quad_staging_vb, 0, g_quad_staging_vb->Size());
 			cb->BufferBarrier(
-				g_quad_gpu_vb, RHIAccessFlags::kTransferWrite, RHIPipelineStageFlags::kTransfer,
-				RHIAccessFlags::kVertexAttributeRead, RHIPipelineStageFlags::kVertexInput);
+				g_quad_gpu_vb, RHIAccessFlagBits::kTransferWrite, RHIPipelineStageFlags::kTransfer,
+				RHIAccessFlagBits::kVertexAttributeRead, RHIPipelineStageFlags::kVertexInput);
 			cb->SetEvent(g_quad_vb_copy_event, RHIPipelineStageFlags::kVertexInput);
 			once = !once;
 		}
@@ -761,6 +921,12 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 			once = !once;
 		}
 
+		static bool b_cube_copied = false;
+		if (!b_cube_copied) {
+			g_cube_vb->CopyToGPU(dev, cb);
+			b_cube_copied = true;
+		}
+
 		ivec4 render_area(0, 0, fb_image->Width(), fb_image->Height());
 		RHIClearValue clear_value = { vec4(0,1,0, 0), 0.0f, 0 };
 		cb->BeginRenderPass(g_main_pass, cur_fb, &render_area, &clear_value, 1);
@@ -770,22 +936,34 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 		cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_tri_pipeline);
 		cb->Draw(3, 1, 0, 0);
 
-		// update uniforms
-		cb->CopyBuffer(g_uniform_buffer, 0, g_uniform_staging_buffer, 0, sizeof(PerFrameUniforms));
-		cb->BufferBarrier(g_uniform_buffer, RHIAccessFlags::kTransferWrite,
-						  RHIPipelineStageFlags::kTransfer, RHIAccessFlags::kUniformRead,
+
+		update_uniform_staging_buf(g_curCBIdx, dev);
+		// update uniforms device buffer (using g_curCBIdx for indexing, assume they are
+		// synchronized and there are same numbers of both)
+		cb->CopyBuffer(g_uniform_buffer, 0, g_uniform_staging_buffer[g_curCBIdx], 0, sizeof(PerFrameUniforms));
+		cb->BufferBarrier(g_uniform_buffer, (uint32_t)RHIAccessFlagBits::kTransferWrite,
+						  RHIPipelineStageFlags::kTransfer, (uint32_t)RHIAccessFlagBits::kUniformRead,
 						  RHIPipelineStageFlags::kVertexShader);
 		cb->SetEvent(g_uniform_buffer_copy_event, RHIPipelineStageFlags::kVertexShader);
 
 		// I think there is no need to wait as we schedule draw in the queue and all operations are sequential there
 		// only necessary if we want to do something on a host, but let it be here as an example
 		if (g_quad_vb_copy_event->IsSet(dev) && g_img_copy_event->IsSet(dev) && g_uniform_buffer_copy_event->IsSet(dev)) {
-
 			cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_quad_pipeline->Layout(), sets, countof(sets));
 			cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_quad_pipeline);
 			cb->BindVertexBuffers(&g_quad_gpu_vb, 0, 1);
 			cb->Draw(4, 1, 0, 0);
 		}
+
+		if (/*g_cube_ib->IsReady(dev) &&*/ g_cube_vb->IsReady(dev) && g_uniform_buffer_copy_event->IsSet(dev)) {
+			cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_world_model_pipeline->Layout(), sets, countof(sets));
+			cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_world_model_pipeline);
+			//cb->BindIndexBuffer(g_cube_ib->device_buf_, 0, RHIIndexType::kUint32);
+			cb->BindVertexBuffers(&g_cube_vb->device_buf_, 0, 1);
+			//cb->DrawIndexed(g_cube_ib->device_buf_->Size()/sizeof(uint32_t), 1, 0, 0, 0);
+			cb->Draw(g_cube_vb->device_buf_->Size()/sizeof(SVD), 1, 0, 0);
+		}
+
 		else {
 			log_debug("Waiting for copy to finish\n");
 		}

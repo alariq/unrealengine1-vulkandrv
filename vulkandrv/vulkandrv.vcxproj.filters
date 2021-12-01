@@ -1830,6 +1830,9 @@
     <ClInclude Include="utils\Image.h">
       <Filter>Header Files\utils</Filter>
     </ClInclude>
+    <ClInclude Include="utils\mesh_utils.h">
+      <Filter>Header Files\utils</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="res.rc">
@@ -1887,6 +1890,12 @@
       <Filter>shaders</Filter>
     </CustomBuild>
     <CustomBuild Include="shaders\spir-v-model.vert">
+      <Filter>shaders</Filter>
+    </CustomBuild>
+    <CustomBuild Include="shaders\spir-v-world-model.frag">
+      <Filter>shaders</Filter>
+    </CustomBuild>
+    <CustomBuild Include="shaders\spir-v-world-model.vert">
       <Filter>shaders</Filter>
     </CustomBuild>
   </ItemGroup>

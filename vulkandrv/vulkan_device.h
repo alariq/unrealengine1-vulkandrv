@@ -273,16 +273,20 @@ public:
 	virtual void Barrier_UndefinedToTransfer(IRHIImage* image);
 	virtual void Barrier_TransferToShaderRead(IRHIImage* image);
 
-	virtual void BufferBarrier(IRHIBuffer *i_buffer, RHIAccessFlags::Value src_acc_flags,
-							   RHIPipelineStageFlags::Value src_stage, RHIAccessFlags::Value dst_acc_fags,
+	virtual void BufferBarrier(IRHIBuffer *i_buffer, RHIAccessFlags src_acc_flags,
+							   RHIPipelineStageFlags::Value src_stage, RHIAccessFlags dst_acc_fags,
 							   RHIPipelineStageFlags::Value dst_stage) ;
 
 	virtual bool Begin() ;
 	virtual bool BeginRenderPass(IRHIRenderPass *i_rp, IRHIFrameBuffer *i_fb, const ivec4 *render_area,
 					   const RHIClearValue *clear_values, uint32_t count) ;
 	virtual void Draw(uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex,
-					  uint32_t first_instance) ;
+					  uint32_t first_instance);
+	virtual void DrawIndexed(uint32_t index_count, uint32_t instance_count, uint32_t first_index,
+							 uint32_t vertex_offset, uint32_t first_instance);
+
     virtual void BindVertexBuffers(IRHIBuffer** i_vb, uint32_t first_binding, uint32_t count) ;
+	virtual void BindIndexBuffer(IRHIBuffer* i_ib, uint32_t offset, RHIIndexType type);
 
 	virtual void CopyBuffer(class IRHIBuffer *dst, uint32_t dst_offset, class IRHIBuffer *src,
 							uint32_t src_offset, uint32_t size) ;

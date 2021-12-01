@@ -935,6 +935,7 @@
     <ClInclude Include="utils\Image.h" />
     <ClInclude Include="utils\logging.h" />
     <ClInclude Include="utils\macros.h" />
+    <ClInclude Include="utils\mesh_utils.h" />
     <ClInclude Include="utils\stream.h" />
     <ClInclude Include="utils\string_utils.h" />
     <ClInclude Include="utils\vec.h" />
@@ -967,6 +968,16 @@
       <FileType>Document</FileType>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension).spv.bin</Outputs>
       <Command Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(SolutionDir)make-spir-v.bat %(FullPath) $(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension)</Command>
+    </CustomBuild>
+    <CustomBuild Include="shaders\spir-v-world-model.frag">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(SolutionDir)make-spir-v.bat %(FullPath) $(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension)</Command>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension).spv.bin</Outputs>
+    </CustomBuild>
+    <CustomBuild Include="shaders\spir-v-world-model.vert">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(SolutionDir)make-spir-v.bat %(FullPath) $(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension)</Command>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension).spv.bin</Outputs>
     </CustomBuild>
     <None Include="VulkanDrv.int" />
   </ItemGroup>

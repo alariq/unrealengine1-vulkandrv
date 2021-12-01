@@ -17,6 +17,11 @@ typedef uint32_t RHIFlags;
 
 typedef void(*fpOnSwapChainRecreated)(void* user_ptr);
 
+enum class RHIIndexType {
+    kUint16 = 0,
+    kUint32 = 1,
+};
+
 //#if defined(USE_QueueType_TRANSLATION)
 struct RHIQueueType { enum Value: uint32_t {
 	kUnknown = 0x0,
@@ -94,7 +99,7 @@ struct RHIPipelineStageFlags { enum Value: uint32_t {
 
 #define USE_ACCESS_FLAGS_TRANSLATION
 #if defined(USE_ACCESS_FLAGS_TRANSLATION)
-struct RHIAccessFlags { enum Value: uint32_t {
+struct RHIAccessFlagBits { enum Value: uint32_t {
 	kIndirectCommandRead = 0x00000001,
 	kIndexRead = 0x00000002,
 	kVertexAttributeRead = 0x00000004,
@@ -115,8 +120,10 @@ struct RHIAccessFlags { enum Value: uint32_t {
 };
 };
 #else
-#define RHIAccessFlags VkAccessFlags
+#define RHIAccessFlagBits VkAccessFlags
 #endif
+
+typedef RHIFlags RHIAccessFlags;
 
 
 #define USE_DependencyFlags_TRANSLATION
@@ -377,7 +384,7 @@ struct RHIColorComponentFlags { enum: uint32_t {
 };
 };
 
-struct RHIBufferUsageFlags { enum: uint32_t {
+struct RHIBufferUsageFlagBits { enum: uint32_t {
     kTransferSrcBit = 0x00000001,
     kTransferDstBit = 0x00000002,
     kUniformTexelBufferBit = 0x00000004,
@@ -388,6 +395,7 @@ struct RHIBufferUsageFlags { enum: uint32_t {
     kVertexBufferBit = 0x00000080
 };
 };
+typedef RHIFlags RHIBufferUsageFlags;
 
 // flags really should not be class
 struct RHIMemoryPropertyFlagBits { enum: uint32_t {
@@ -545,8 +553,8 @@ struct RHISubpassDependency {
     uint32_t         dstSubpass;
     RHIPipelineStageFlags::Value srcStageMask;
     RHIPipelineStageFlags::Value dstStageMask;
-    RHIAccessFlags::Value   srcAccessMask;
-    RHIAccessFlags::Value  dstAccessMask;
+    RHIAccessFlagBits::Value   srcAccessMask;
+    RHIAccessFlagBits::Value  dstAccessMask;
     uint32_t        dependencyFlags; // RHIDependencyFlags 
 };
 
@@ -741,8 +749,11 @@ public:
 									const class IRHIDescriptorSet * const*desc_sets, uint32_t count) = 0;
 	virtual void Draw(uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex,
 					  uint32_t first_instance) = 0;
+	virtual void DrawIndexed(uint32_t index_count, uint32_t instance_count, uint32_t first_index,
+							 uint32_t vertex_offset, uint32_t first_instance) = 0;
 
     virtual void BindVertexBuffers(class IRHIBuffer** i_vb, uint32_t first_binding, uint32_t count) = 0;
+    virtual void BindIndexBuffer(class IRHIBuffer* i_ib, uint32_t offset, RHIIndexType type) = 0;
 
 	virtual void CopyBuffer(class IRHIBuffer *dst, uint32_t dst_offset, class IRHIBuffer *src,
 							uint32_t src_offset, uint32_t size) = 0;
@@ -757,8 +768,8 @@ public:
 	virtual bool End() = 0;
 	virtual void EndRenderPass(const IRHIRenderPass *i_rp, IRHIFrameBuffer *i_fb) = 0;
 
-	virtual void BufferBarrier(IRHIBuffer *i_buffer, RHIAccessFlags::Value src_acc_flags,
-					   RHIPipelineStageFlags::Value src_stage, RHIAccessFlags::Value dst_acc_fags,
+	virtual void BufferBarrier(IRHIBuffer *i_buffer, RHIAccessFlags src_acc_flags,
+					   RHIPipelineStageFlags::Value src_stage, RHIAccessFlags dst_acc_fags,
 					   RHIPipelineStageFlags::Value dst_stage) = 0;
 
 	virtual void Barrier_ClearToPresent(IRHIImage* image) = 0;

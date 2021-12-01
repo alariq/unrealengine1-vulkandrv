@@ -289,35 +289,33 @@ VkPipelineStageFlags translate_ps(RHIPipelineStageFlags pipeline_stage) {
 #endif
 
 #if defined(USE_ACCESS_FLAGS_TRANSLATION)
-VkAccessFlags translate(RHIAccessFlags::Value access_flags) {
+VkAccessFlags translate_af(RHIAccessFlags access_flags) {
+	// TODO: actually process them as flags (i.e. or the values)
 	switch (access_flags) {
-	case RHIAccessFlags::kIndirectCommandRead: return VK_ACCESS_INDIRECT_COMMAND_READ_BIT ;
-		case RHIAccessFlags::kIndexRead: return VK_ACCESS_INDEX_READ_BIT ;
-		case RHIAccessFlags::kVertexAttributeRead: return VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT ;
-		case RHIAccessFlags::kUniformRead : return VK_ACCESS_UNIFORM_READ_BIT ;
-		case RHIAccessFlags::kInputAttachmentRead : return VK_ACCESS_INPUT_ATTACHMENT_READ_BIT ;
-		case RHIAccessFlags::kShaderRead : return VK_ACCESS_SHADER_READ_BIT ;
-		case RHIAccessFlags::kShaderWrite : return VK_ACCESS_SHADER_WRITE_BIT ;
-		case RHIAccessFlags::kColorAttachmentRead : return VK_ACCESS_COLOR_ATTACHMENT_READ_BIT ;
-		case RHIAccessFlags::kColorAttachmentWrite : return VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT ;
-		case RHIAccessFlags::kDepthStencilAttachmentRead : return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT ;
-		case RHIAccessFlags::kDepthStencilAttachmentWrite : return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT ;
-		case RHIAccessFlags::kTransferRead : return VK_ACCESS_TRANSFER_READ_BIT ;
-		case RHIAccessFlags::kTransferWrite : return VK_ACCESS_TRANSFER_WRITE_BIT ;
-		case RHIAccessFlags::kHostRead : return VK_ACCESS_HOST_READ_BIT ;
-		case RHIAccessFlags::kHostWrite : return VK_ACCESS_HOST_WRITE_BIT ;
-		case RHIAccessFlags::kMemoryRead : return VK_ACCESS_MEMORY_READ_BIT ;
-		case RHIAccessFlags::kMemoryWrite : return VK_ACCESS_MEMORY_WRITE_BIT ;
+	case RHIAccessFlagBits::kIndirectCommandRead: return VK_ACCESS_INDIRECT_COMMAND_READ_BIT ;
+		case RHIAccessFlagBits::kIndexRead: return VK_ACCESS_INDEX_READ_BIT ;
+		case RHIAccessFlagBits::kVertexAttributeRead: return VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT ;
+		case RHIAccessFlagBits::kUniformRead : return VK_ACCESS_UNIFORM_READ_BIT ;
+		case RHIAccessFlagBits::kInputAttachmentRead : return VK_ACCESS_INPUT_ATTACHMENT_READ_BIT ;
+		case RHIAccessFlagBits::kShaderRead : return VK_ACCESS_SHADER_READ_BIT ;
+		case RHIAccessFlagBits::kShaderWrite : return VK_ACCESS_SHADER_WRITE_BIT ;
+		case RHIAccessFlagBits::kColorAttachmentRead : return VK_ACCESS_COLOR_ATTACHMENT_READ_BIT ;
+		case RHIAccessFlagBits::kColorAttachmentWrite : return VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT ;
+		case RHIAccessFlagBits::kDepthStencilAttachmentRead : return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT ;
+		case RHIAccessFlagBits::kDepthStencilAttachmentWrite : return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT ;
+		case RHIAccessFlagBits::kTransferRead : return VK_ACCESS_TRANSFER_READ_BIT ;
+		case RHIAccessFlagBits::kTransferWrite : return VK_ACCESS_TRANSFER_WRITE_BIT ;
+		case RHIAccessFlagBits::kHostRead : return VK_ACCESS_HOST_READ_BIT ;
+		case RHIAccessFlagBits::kHostWrite : return VK_ACCESS_HOST_WRITE_BIT ;
+		case RHIAccessFlagBits::kMemoryRead : return VK_ACCESS_MEMORY_READ_BIT ;
+		case RHIAccessFlagBits::kMemoryWrite : return VK_ACCESS_MEMORY_WRITE_BIT ;
 		default:
 			assert(0 && "Invalid access flags!");
 			return VK_ACCESS_FLAG_BITS_MAX_ENUM;
 	};
 }
-VkAccessFlags translate_af(RHIAccessFlags::Value access_flags) {
-	return translate(access_flags);
-}
 #else
-VkAccessFlags translate_af(RHIAccessFlags access_flags) {
+VkAccessFlags translate_af(RHIAccessFlagBits access_flags) {
 	return access_flags;
 }
 #endif
@@ -542,14 +540,14 @@ VkLogicOp translate(RHILogicOp::Value logic_op) {
 
 VkBufferUsageFlags translate_buffer_usage(uint32_t usage) {
 
-    VkBufferUsageFlags vk_usage = (usage & RHIBufferUsageFlags::kTransferSrcBit) ? VK_BUFFER_USAGE_TRANSFER_SRC_BIT : 0;
-    vk_usage |= (usage & RHIBufferUsageFlags::kTransferDstBit) ? VK_BUFFER_USAGE_TRANSFER_DST_BIT : 0;
-    vk_usage |= (usage & RHIBufferUsageFlags::kUniformTexelBufferBit) ? VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT: 0;
-    vk_usage |= (usage & RHIBufferUsageFlags::kStorageTexelBufferBit) ? VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT: 0;
-    vk_usage |= (usage & RHIBufferUsageFlags::kStorageBufferBit) ? VK_BUFFER_USAGE_STORAGE_BUFFER_BIT: 0;
-    vk_usage |= (usage & RHIBufferUsageFlags::kUniformBufferBit) ? VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT: 0;
-    vk_usage |= (usage & RHIBufferUsageFlags::kIndexBufferBit) ? VK_BUFFER_USAGE_INDEX_BUFFER_BIT: 0;
-    vk_usage |= (usage & RHIBufferUsageFlags::kVertexBufferBit) ? VK_BUFFER_USAGE_VERTEX_BUFFER_BIT: 0;
+    VkBufferUsageFlags vk_usage = (usage & RHIBufferUsageFlagBits::kTransferSrcBit) ? VK_BUFFER_USAGE_TRANSFER_SRC_BIT : 0;
+    vk_usage |= (usage & RHIBufferUsageFlagBits::kTransferDstBit) ? VK_BUFFER_USAGE_TRANSFER_DST_BIT : 0;
+    vk_usage |= (usage & RHIBufferUsageFlagBits::kUniformTexelBufferBit) ? VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT: 0;
+    vk_usage |= (usage & RHIBufferUsageFlagBits::kStorageTexelBufferBit) ? VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT: 0;
+    vk_usage |= (usage & RHIBufferUsageFlagBits::kStorageBufferBit) ? VK_BUFFER_USAGE_STORAGE_BUFFER_BIT: 0;
+    vk_usage |= (usage & RHIBufferUsageFlagBits::kUniformBufferBit) ? VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT: 0;
+    vk_usage |= (usage & RHIBufferUsageFlagBits::kIndexBufferBit) ? VK_BUFFER_USAGE_INDEX_BUFFER_BIT: 0;
+    vk_usage |= (usage & RHIBufferUsageFlagBits::kVertexBufferBit) ? VK_BUFFER_USAGE_VERTEX_BUFFER_BIT: 0;
     return vk_usage;
 };
 
@@ -1077,10 +1075,10 @@ void RHIBufferVk::Destroy(IRHIDevice* device) {
 
 void *RHIBufferVk::Map(IRHIDevice* device, uint32_t offset, uint32_t size, uint32_t map_flags) {
     assert(!is_mapped_);
-	assert((size==(uint32_t)-1U && offset==0) || this->buf_size_ >= offset + size);
+	assert((size==(uint32_t)(-1U) && offset==0) || this->buf_size_ >= offset + size);
 	assert(this->mem_flags_ & RHIMemoryPropertyFlagBits::kHostVisible);
 
-	uint32_t map_size = size == (uint32_t)-1U ? this->buf_size_ : size;
+	uint32_t map_size = size == (uint32_t)(-1U) ? this->buf_size_ : size;
 
 	RHIDeviceVk* dev = ResourceCast(device);
 	void *ptr;
@@ -1236,8 +1234,8 @@ void Barrier(VkCommandBuffer cb, RHIImageVk* image,
 	image->vk_layout_ = new_layout;
 }
 
-void RHICmdBufVk::BufferBarrier(IRHIBuffer *i_buffer, RHIAccessFlags::Value src_acc_flags,
-								RHIPipelineStageFlags::Value src_stage, RHIAccessFlags::Value dst_acc_fags,
+void RHICmdBufVk::BufferBarrier(IRHIBuffer *i_buffer, RHIAccessFlags src_acc_flags,
+								RHIPipelineStageFlags::Value src_stage, RHIAccessFlags dst_acc_fags,
 								RHIPipelineStageFlags::Value dst_stage) {
 	RHIBufferVk* buffer = ResourceCast(i_buffer);
 
@@ -1372,6 +1370,12 @@ void RHICmdBufVk::Draw(uint32_t vertex_count, uint32_t instance_count, uint32_t 
     vkCmdDraw(cb_, vertex_count, instance_count, first_vertex, first_instance);
 }
 
+void RHICmdBufVk::DrawIndexed(uint32_t index_count, uint32_t instance_count, uint32_t first_index,
+					  uint32_t vertex_offset, uint32_t first_instance) {
+    assert(is_recording_);
+	vkCmdDrawIndexed(cb_, index_count, instance_count, first_index, vertex_offset, first_instance);
+}
+
 void RHICmdBufVk::BindVertexBuffers(IRHIBuffer** i_vb, uint32_t first_binding, uint32_t count) {
     std::vector<VkBuffer> vbs(count); // :-(
     std::vector<VkDeviceSize> offsets(count); // :-(
@@ -1381,6 +1385,13 @@ void RHICmdBufVk::BindVertexBuffers(IRHIBuffer** i_vb, uint32_t first_binding, u
         offsets[i] = 0;
     }
     vkCmdBindVertexBuffers(cb_, first_binding, count, vbs.data(), offsets.data());
+}
+
+void RHICmdBufVk::BindIndexBuffer(IRHIBuffer* i_ib, uint32_t offset, RHIIndexType type) {
+	RHIBufferVk* ib = ResourceCast(i_ib);
+	vkCmdBindIndexBuffer(cb_, ib->Handle(), offset,
+						 type == RHIIndexType::kUint16 ? VK_INDEX_TYPE_UINT16
+													   : VK_INDEX_TYPE_UINT32);
 }
 
 void RHICmdBufVk::CopyBuffer(class IRHIBuffer *i_dst, uint32_t dst_offset, class IRHIBuffer *i_src,
@@ -1653,8 +1664,8 @@ IRHIRenderPass* RHIDeviceVk::CreateRenderPass(const RHIRenderPassDesc* desc) {
 		dep_arr[i].dstSubpass = sp_dep.dstSubpass;
 		dep_arr[i].srcStageMask = translate(sp_dep.srcStageMask);
 		dep_arr[i].dstStageMask = translate(sp_dep.dstStageMask);
-		dep_arr[i].srcAccessMask = translate(sp_dep.srcAccessMask);
-		dep_arr[i].dstAccessMask = translate(sp_dep.dstAccessMask);
+		dep_arr[i].srcAccessMask = translate_af(sp_dep.srcAccessMask);
+		dep_arr[i].dstAccessMask = translate_af(sp_dep.dstAccessMask);
 		dep_arr[i].dependencyFlags = translate_dependency_flags(sp_dep.dependencyFlags);
 	}
 
