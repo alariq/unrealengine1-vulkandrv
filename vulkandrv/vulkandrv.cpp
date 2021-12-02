@@ -970,10 +970,6 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 		cb->EndRenderPass(g_main_pass, cur_fb);
 	}
 
-
-	cb->End();
-	dev->Submit(cb, RHIQueueType::kGraphics);
-
 	sanity_lock_cnt++;
 }
 
@@ -981,6 +977,10 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 {
 	IRHIDevice* dev = g_vulkan_device;
 	assert(1 == sanity_lock_cnt);
+
+	IRHICmdBuf* cb = g_cmdbuf[g_curCBIdx];
+	cb->End();
+	dev->Submit(cb, RHIQueueType::kGraphics);
 
 	if (!g_vulkan_device->Present())
 	{
