@@ -257,6 +257,15 @@ struct RHIPipelineBindPoint { enum Value: uint32_t {
 #define RHIPipelineBindPoint VkPipelineBindPoint 
 #endif
 
+struct RHIDynamicState { enum Value : uint32_t {
+        kViewport = 0,
+        kScissor = 1,
+        kLineWidth = 2,
+        kDepthBias = 3,
+        kBlendConstants = 4,
+        //...
+};};
+
 #define USE_ImageViewType_TRANSLATION
 #if defined(USE_ImageViewType_TRANSLATION) 
 struct RHIImageViewType { enum Value: uint32_t {
@@ -765,6 +774,8 @@ public:
     //TODO: implement
     //virtual void WaitForEvent(IRHIEvent* event, ...) = 0;
 
+    virtual void SetViewport(const RHIViewport* viewport, uint32_t count) = 0;
+
 	virtual bool End() = 0;
 	virtual void EndRenderPass(const IRHIRenderPass *i_rp, IRHIFrameBuffer *i_fb) = 0;
 
@@ -892,6 +903,7 @@ public:
             const RHIInputAssemblyState *input_assembly_state, const RHIViewportState *viewport_state,
             const RHIRasterizationState *raster_state, const RHIMultisampleState *multisample_state,
             const RHIColorBlendState *color_blend_state, const IRHIPipelineLayout *i_pipleline_layout,
+            const RHIDynamicState::Value* dynamic_state, const uint32_t dynamic_state_count,
             const IRHIRenderPass *i_render_pass) = 0;
 
     virtual IRHIPipelineLayout* CreatePipelineLayout(const IRHIDescriptorSetLayout* const* desc_set_layouts, uint32_t count) = 0;

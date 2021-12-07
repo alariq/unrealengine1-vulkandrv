@@ -379,6 +379,19 @@ VkPipelineBindPoint translate_pbp(RHIPipelineBindPoint pipeline_bind_point) {
 }
 #endif
 
+VkDynamicState translate_ds(RHIDynamicState::Value dynamic_state) {
+	static VkDynamicState ds[] = {
+    VK_DYNAMIC_STATE_VIEWPORT,
+    VK_DYNAMIC_STATE_SCISSOR,
+    VK_DYNAMIC_STATE_LINE_WIDTH,
+    VK_DYNAMIC_STATE_DEPTH_BIAS,
+    VK_DYNAMIC_STATE_BLEND_CONSTANTS,
+	};
+
+	assert((uint32_t)dynamic_state < countof(ds));
+	return ds[(uint32_t)dynamic_state];
+}
+
 #if defined(USE_ImageAspectFlags_TRANSLATION)
 VkImageAspectFlags translate_image_aspect(uint32_t bits) {
 	VkImageAspectFlags rv = (bits & (uint32_t)RHIImageAspectFlags::kColor) ? VK_IMAGE_ASPECT_COLOR_BIT: 0;
@@ -819,6 +832,7 @@ RHIGraphicsPipelineVk *RHIGraphicsPipelineVk::Create(
 	const RHIInputAssemblyState *input_assembly_state, const RHIViewportState *viewport_state,
 	const RHIRasterizationState *raster_state, const RHIMultisampleState *multisample_state,
 	const RHIColorBlendState *color_blend_state, const IRHIPipelineLayout *i_pipleline_layout,
+    const RHIDynamicState::Value* dynamic_state, const uint32_t dynamic_state_count,
 	const IRHIRenderPass *i_render_pass) {
 
 	RHIDeviceVk* dev = ResourceCast(device);
@@ -960,6 +974,17 @@ RHIGraphicsPipelineVk *RHIGraphicsPipelineVk::Create(
 		}                                    
     };
 
+	VkPipelineDynamicStateCreateInfo dyn_state_create_info;
+	std::vector<VkDynamicState> dyn_states(dynamic_state_count);
+	dyn_state_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+	dyn_state_create_info.pNext = nullptr;
+	dyn_state_create_info.flags = 0;
+	for (int i = 0; i < (int)dynamic_state_count; ++i) {
+		dyn_states[i] = translate_ds(dynamic_state[i]);
+	}
+	dyn_state_create_info.dynamicStateCount = dynamic_state_count;
+	dyn_state_create_info.pDynamicStates = dyn_states.data();
+
 	const RHIPipelineLayoutVk* playout = ResourceCast(i_pipleline_layout);
 	const RHIRenderPassVk* render_pass = ResourceCast(i_render_pass);
 
@@ -977,7 +1002,7 @@ RHIGraphicsPipelineVk *RHIGraphicsPipelineVk::Create(
       &multisample_state_create_info,                               // const VkPipelineMultisampleStateCreateInfo    *pMultisampleState
       nullptr,                                                      // const VkPipelineDepthStencilStateCreateInfo   *pDepthStencilState
       &color_blend_state_create_info,                               // const VkPipelineColorBlendStateCreateInfo     *pColorBlendState
-      nullptr,                                                      // const VkPipelineDynamicStateCreateInfo        *pDynamicState
+      &dyn_state_create_info,                                       // const VkPipelineDynamicStateCreateInfo        *pDynamicState
       playout ? playout->Handle() : VK_NULL_HANDLE,                 // VkPipelineLayout                               layout
       render_pass->Handle(),                                        // VkRenderPass                                   renderPass
       0,                                                            // uint32_t                                       subpass
@@ -993,6 +1018,7 @@ RHIGraphicsPipelineVk *RHIGraphicsPipelineVk::Create(
 	}
 
 	RHIGraphicsPipelineVk* vk_pipeline = new RHIGraphicsPipelineVk(pipeline, playout);
+	vk_pipeline->dyn_states_ = dyn_states;
 	return vk_pipeline;
 }
 
@@ -1075,10 +1101,10 @@ void RHIBufferVk::Destroy(IRHIDevice* device) {
 
 void *RHIBufferVk::Map(IRHIDevice* device, uint32_t offset, uint32_t size, uint32_t map_flags) {
     assert(!is_mapped_);
-	assert((size==(uint32_t)(-1U) && offset==0) || this->buf_size_ >= offset + size);
+	assert((size==0xFFFFFFFF && offset==0) || this->buf_size_ >= offset + size);
 	assert(this->mem_flags_ & RHIMemoryPropertyFlagBits::kHostVisible);
 
-	uint32_t map_size = size == (uint32_t)(-1U) ? this->buf_size_ : size;
+	uint32_t map_size = size == 0xFFFFFFFF ? this->buf_size_ : size;
 
 	RHIDeviceVk* dev = ResourceCast(device);
 	void *ptr;
@@ -1275,6 +1301,7 @@ bool RHICmdBufVk::End() {
 		return false;
 	}
 	is_recording_ = false;
+	cur_bound_pipeline_ = nullptr;
 	return true;
 }
 
@@ -1332,6 +1359,7 @@ bool RHICmdBufVk::BeginRenderPass(IRHIRenderPass *i_rp, IRHIFrameBuffer *i_fb, c
 void RHICmdBufVk::BindPipeline(RHIPipelineBindPoint::Value bind_point, IRHIGraphicsPipeline* i_pipeline) {
     assert(is_recording_);
     const RHIGraphicsPipelineVk* pipeline = ResourceCast(i_pipeline);
+	cur_bound_pipeline_ = pipeline;
 
     vkCmdBindPipeline(cb_, translate_pbp(bind_point), pipeline->Handle());
 }
@@ -1453,6 +1481,22 @@ void RHICmdBufVk::SetEvent(IRHIEvent* i_event, RHIPipelineStageFlags::Value stag
 void RHICmdBufVk::ResetEvent(IRHIEvent* i_event, RHIPipelineStageFlags::Value stage) {
     const RHIEventVk* event = ResourceCast(i_event); 
     vkCmdResetEvent(cb_, event->Handle(), translate_ps(stage));
+}
+
+void RHICmdBufVk::SetViewport(const RHIViewport* viewports, uint32_t count) {
+
+	assert(cur_bound_pipeline_ && cur_bound_pipeline_->HasDynamicState(VK_DYNAMIC_STATE_VIEWPORT));
+
+	std::vector<VkViewport> vk_viewports(count);
+	for (uint32_t i = 0; i < (uint32_t)vk_viewports.size(); ++i) {
+		vk_viewports[i].x = viewports[i].x;
+		vk_viewports[i].y = viewports[i].y;
+		vk_viewports[i].width = viewports[i].width;
+		vk_viewports[i].height = viewports[i].height;
+		vk_viewports[i].minDepth = viewports[i].minDepth;
+		vk_viewports[i].maxDepth = viewports[i].maxDepth;
+	}
+	vkCmdSetViewport(cb_, 0, count, vk_viewports.data());
 }
 
 void RHICmdBufVk::Clear(IRHIImage* image_in, const vec4& color, uint32_t img_aspect_bits) {
@@ -2062,15 +2106,18 @@ IRHIGraphicsPipeline *RHIDeviceVk::CreateGraphicsPipeline(
 	const RHIInputAssemblyState *input_assembly_state, const RHIViewportState *viewport_state,
 	const RHIRasterizationState *raster_state, const RHIMultisampleState *multisample_state,
 	const RHIColorBlendState *color_blend_state, const IRHIPipelineLayout *i_pipleline_layout,
+	const RHIDynamicState::Value *dynamic_state, const uint32_t dynamic_state_count,
 	const IRHIRenderPass *i_render_pass) {
 
 	return RHIGraphicsPipelineVk::Create(this, shader_stage, shader_stage_count, vertex_input_state,
 										 input_assembly_state, viewport_state, raster_state,
 										 multisample_state, color_blend_state, i_pipleline_layout,
-										 i_render_pass);
+										 dynamic_state, dynamic_state_count, i_render_pass);
 }
 
-IRHIPipelineLayout* RHIDeviceVk::CreatePipelineLayout(const IRHIDescriptorSetLayout*const* desc_set_layout, uint32_t count) {
+IRHIPipelineLayout *
+RHIDeviceVk::CreatePipelineLayout(const IRHIDescriptorSetLayout *const *desc_set_layout,
+								  uint32_t count) {
     return RHIPipelineLayoutVk::Create(this, desc_set_layout, count);
 }
 

@@ -63,6 +63,8 @@ struct PerFrameUniforms {
 	mat4 normal_tr;
 	mat4 vwp;
 };
+mat4 g_current_projection = mat4::identity();
+RHIViewport g_current_viewport;
 
 RHIVertexInputBindingDesc vert_bindings_desc[] = {
 	{0, sizeof(SimpleVertex), RHIVertexInputRate::kVertex}};
@@ -232,7 +234,7 @@ void update_uniform_staging_buf(int idx, IRHIDevice* dev) {
 	const float w = (float)dev->GetSwapChainImage(0)->Width();
 	const float h = (float)dev->GetSwapChainImage(0)->Height();
 	//uniptr->proj = frustumProjMatrix(-w / 2.0f, w / 2.0f, -h / 2.0f, h / 2.0f, 0.1f, 100.0f);
-	uniptr->proj = perspectiveMatrixX(45.0f * M_PI / 180.0f, w, h, 1.0f, 100.0f, false);
+	uniptr->proj = g_current_projection;// perspectiveMatrixX(45.0f * M_PI / 180.0f, w, h, 1.0f, 100.0f, false);
 	uniptr->vwp = uniptr->proj * uniptr->view * uniptr->world;
 	mat4 vw = uniptr->view * uniptr->world;
 	mat3 vw3(vw.getRow(0).xyz(), vw.getRow(1).xyz(), vw.getRow(2).xyz());
@@ -622,6 +624,7 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	viewport.height = (float)NewY;
 	viewport.minDepth = 0.0f;
 	viewport.maxDepth = 1.0f;
+	g_current_viewport = viewport;
 
 	RHIViewportState viewport_state;
 	viewport_state.pScissors = &scissors;
@@ -665,6 +668,8 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	blend_att_state.dstAlphaBlendFactor = RHIBlendFactor::Zero;
 
 	RHIColorBlendState blend_state = {false, RHILogicOp::kCopy, 1, &blend_att_state, {0, 0, 0, 0}};
+
+	RHIDynamicState::Value dyn_state[] = { RHIDynamicState::kViewport };
 
 	RHIDescriptorSetLayoutDesc dsl_desc[] = {
 		{RHIDescriptorType::kSampler, RHIShaderStageFlagBits::kFragment, 1, 0},
@@ -722,15 +727,15 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 
 	g_tri_pipeline = device->CreateGraphicsPipeline(
 		&tri_shader_stage[0], countof(tri_shader_stage), &tri_vi_state, &tri_ia_state,
-		&viewport_state, &raster_state, &ms_state, &blend_state, pipeline_layout, g_main_pass);
+		&viewport_state, &raster_state, &ms_state, &blend_state, pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
 
 	g_quad_pipeline = device->CreateGraphicsPipeline(
 		&quad_shader_stage[0], countof(quad_shader_stage), &quad_vi_state, &quad_ia_state,
-		&viewport_state, &raster_state, &ms_state, &blend_state, pipeline_layout, g_main_pass);
+		&viewport_state, &raster_state, &ms_state, &blend_state, pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
 
 	g_world_model_pipeline = device->CreateGraphicsPipeline(
 		g_cube_shader->stages_, countof(g_cube_shader->stages_), &world_model_vi_state, &tris_ia_state,
-		&viewport_state, &world_model_raster_state, &ms_state, &blend_state, pipeline_layout, g_main_pass);
+		&viewport_state, &world_model_raster_state, &ms_state, &blend_state, pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
 
 	if (!UVulkanRenderDevice::SetRes(NewX, NewY, NewColorBytes, Fullscreen)) {
 		GError->Log(L"Init: SetRes failed.");
@@ -934,8 +939,8 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 		const IRHIDescriptorSet* sets[] = { g_my_ds_set0, g_my_ds_set1 };
 		cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_tri_pipeline->Layout(), sets, countof(sets));
 		cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_tri_pipeline);
+		cb->SetViewport(&g_current_viewport, 1);
 		cb->Draw(3, 1, 0, 0);
-
 
 		update_uniform_staging_buf(g_curCBIdx, dev);
 		// update uniforms device buffer (using g_curCBIdx for indexing, assume they are
@@ -1063,8 +1068,25 @@ UBOOL UVulkanRenderDevice::Exec(const TCHAR* Cmd, FOutputDevice& Ar)
 	return 0;
 }
 
+/**
+This optional function can be used to set the frustum and viewport parameters per scene change instead of per drawXXXX() call.
+\param Frame Contains various information with which to build frustum and viewport.
+\note Standard Z parameters: near 1, far 32760.
+*/
 void UVulkanRenderDevice::SetSceneNode(FSceneNode* Frame)
 {
+	//Calculate projection parameters 
+	float aspect = Frame->FY/Frame->FX;
+	float RProjZ = appTan(Viewport->Actor->FovAngle * PI/360.0 );
+
+	float fov = Viewport->Actor->FovAngle * PI / 180.0f;
+	g_current_projection = perspectiveMatrixX(fov, Frame->FX, Frame->FY, zNear, zFar, false);
+
+	// Viewport is set here as it changes during gameplay. For example in DX conversations
+ 	//D3D::setViewPort(Frame->X,Frame->Y,Frame->XB,Frame->YB); 
+
+	//shader_GouraudPolygon->setViewportSize(Frame->X,Frame->Y);	//Shared by all Unreal shaders
+	//shader_GouraudPolygon->setProjection(aspect,RProjZ,zNear,zFar);	//Shared by all Unreal shaders
 }
 
 /**

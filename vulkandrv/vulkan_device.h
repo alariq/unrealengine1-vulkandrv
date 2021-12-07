@@ -183,6 +183,8 @@ class RHIGraphicsPipelineVk: public IRHIGraphicsPipeline {
 	VkPipeline handle_;
 	const RHIPipelineLayoutVk* const layout_;
 public:
+	std::vector<VkDynamicState> dyn_states_;
+
 	void Destroy(IRHIDevice *device);
 	static RHIGraphicsPipelineVk *
 	Create(IRHIDevice *device, const RHIShaderStage *shader_stage, uint32_t shader_stage_count,
@@ -191,12 +193,16 @@ public:
 		   const RHIViewportState *viewport_state, const RHIRasterizationState *raster_state,
 		   const RHIMultisampleState *multisample_state,
 		   const RHIColorBlendState *color_blend_state, const IRHIPipelineLayout *pipleline_layout,
+		   const RHIDynamicState::Value* dynamic_state, const uint32_t dynamic_state_count,
 		   const IRHIRenderPass *render_pass);
 
 	RHIGraphicsPipelineVk(VkPipeline pipeline, const RHIPipelineLayoutVk *playout)
 		: handle_(pipeline), layout_(playout) {}
 	VkPipeline Handle() const { return handle_; }
 	const IRHIPipelineLayout* Layout() const { return layout_; }
+	bool HasDynamicState(VkDynamicState dyn_state) const {
+		return dyn_states_.end() != std::find(dyn_states_.begin(), dyn_states_.end(), dyn_state);
+	}
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -261,6 +267,9 @@ class RHIEventVk: public IRHIEvent {
 class RHICmdBufVk: public IRHICmdBuf {
 	VkCommandBuffer cb_;
 	bool is_recording_;// = false;
+
+	// debug
+	const RHIGraphicsPipelineVk* cur_bound_pipeline_ = nullptr;
 public:
 	RHICmdBufVk(VkCommandBuffer cb/*, uint32_t qfi, VkCommandPool cmd_pool*/) :
 		cb_(cb) {}
@@ -295,6 +304,8 @@ public:
 
     virtual void SetEvent(IRHIEvent* event, RHIPipelineStageFlags::Value stage) ;
     virtual void ResetEvent(IRHIEvent* event, RHIPipelineStageFlags::Value stage) ;
+
+    virtual void SetViewport(const RHIViewport* viewport, uint32_t count);
 
 	virtual bool End() ;
 	virtual void EndRenderPass(const IRHIRenderPass *i_rp, IRHIFrameBuffer *i_fb) ;
@@ -386,6 +397,7 @@ public:
             const RHIInputAssemblyState *input_assembly_state, const RHIViewportState *viewport_state,
             const RHIRasterizationState *raster_state, const RHIMultisampleState *multisample_state,
             const RHIColorBlendState *color_blend_state, const IRHIPipelineLayout *i_pipleline_layout,
+            const RHIDynamicState::Value* dynamic_state, const uint32_t dynamic_state_count,
             const IRHIRenderPass *i_render_pass) ;
 
     virtual IRHIPipelineLayout* CreatePipelineLayout(const IRHIDescriptorSetLayout*const* desc_set_layout, uint32_t count);
