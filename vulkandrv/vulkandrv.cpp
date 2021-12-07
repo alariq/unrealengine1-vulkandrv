@@ -953,14 +953,15 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 
 		// I think there is no need to wait as we schedule draw in the queue and all operations are sequential there
 		// only necessary if we want to do something on a host, but let it be here as an example
-		if (g_quad_vb_copy_event->IsSet(dev) && g_img_copy_event->IsSet(dev) && g_uniform_buffer_copy_event->IsSet(dev)) {
+		//if (g_quad_vb_copy_event->IsSet(dev) && g_img_copy_event->IsSet(dev) && g_uniform_buffer_copy_event->IsSet(dev)) 
+		{
 			cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_quad_pipeline->Layout(), sets, countof(sets));
 			cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_quad_pipeline);
 			cb->BindVertexBuffers(&g_quad_gpu_vb, 0, 1);
 			cb->Draw(4, 1, 0, 0);
 		}
 
-		if (/*g_cube_ib->IsReady(dev) &&*/ g_cube_vb->IsReady(dev) && g_uniform_buffer_copy_event->IsSet(dev)) {
+		{
 			cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_world_model_pipeline->Layout(), sets, countof(sets));
 			cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_world_model_pipeline);
 			//cb->BindIndexBuffer(g_cube_ib->device_buf_, 0, RHIIndexType::kUint32);
@@ -969,9 +970,6 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 			cb->Draw(g_cube_vb->device_buf_->Size()/sizeof(SVD), 1, 0, 0);
 		}
 
-		else {
-			log_debug("Waiting for copy to finish\n");
-		}
 		cb->EndRenderPass(g_main_pass, cur_fb);
 	}
 
