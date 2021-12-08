@@ -24,6 +24,9 @@ layout(location = 1) out vec2 v_UV;
 
 void main() {
     gl_Position = vec4(pos.xyz,1) * PerFrameData.vwp;
+    // or equivalent
+    //gl_Position = vec4(pos.xyz,1) * PerFrameData.world * PerFrameData.view * PerFrameData.proj;
+
     v_Normal.xyz = (vec4(normal,0) * PerFrameData.normal_tr ).xyz;
     v_UV = uv;
 }
