@@ -191,6 +191,10 @@ struct SShader {
 		sh->stages_[1].module = dev->CreateShader(RHIShaderStageFlagBits::kFragment, ps_data, ps_size);
 		sh->stages_[1].pEntryPointName = "main";
 		sh->stages_[1].stage = RHIShaderStageFlagBits::kFragment;
+
+		delete[] vs_data;
+		delete[] ps_data;
+
 		return sh;
 	}
 };
