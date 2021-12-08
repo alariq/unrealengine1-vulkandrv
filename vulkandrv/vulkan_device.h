@@ -267,6 +267,7 @@ class RHIEventVk: public IRHIEvent {
 class RHICmdBufVk: public IRHICmdBuf {
 	VkCommandBuffer cb_;
 	bool is_recording_;// = false;
+	bool is_in_render_pass_;// = false;
 
 	// debug
 	const RHIGraphicsPipelineVk* cur_bound_pipeline_ = nullptr;

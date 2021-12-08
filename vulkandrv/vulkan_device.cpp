@@ -1306,7 +1306,7 @@ bool RHICmdBufVk::End() {
 }
 
 void RHICmdBufVk::EndRenderPass(const IRHIRenderPass *i_rp, IRHIFrameBuffer *i_fb) {
-    assert(is_recording_);
+    assert(is_recording_ && is_in_render_pass_);
     vkCmdEndRenderPass(cb_);
 
 	const RHIRenderPassVk* rp = ResourceCast(i_rp);
@@ -1317,11 +1317,13 @@ void RHICmdBufVk::EndRenderPass(const IRHIRenderPass *i_rp, IRHIFrameBuffer *i_f
         RHIImageVk* img = ResourceCast(att->GetImage());
         img->vk_layout_ = translate_il(rp->GetFinalLayout(i));
     }
+
+	is_in_render_pass_ = false;
 }
 
 bool RHICmdBufVk::BeginRenderPass(IRHIRenderPass *i_rp, IRHIFrameBuffer *i_fb, const ivec4 *render_area,
 						const RHIClearValue *clear_values, uint32_t count) {
-    assert(is_recording_);
+    assert(is_recording_ && !is_in_render_pass_);
 
 	const RHIRenderPassVk* rp = ResourceCast(i_rp);
     const RHIFrameBufferVk* fb = ResourceCast(i_fb);
@@ -1352,6 +1354,7 @@ bool RHICmdBufVk::BeginRenderPass(IRHIRenderPass *i_rp, IRHIFrameBuffer *i_fb, c
         vk_clear_values.data()
     };
     vkCmdBeginRenderPass(cb_, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE );
+	is_in_render_pass_ = true;
 
     return true;
 }
