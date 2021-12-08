@@ -507,31 +507,11 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 		g_main_fb[i] = device->CreateFrameBuffer(&fb_desc, g_main_pass);
 	}
 
-	size_t vs_size;
-	const uint32_t *vs =
-		(uint32_t *)filesystem::loadfile("vulkandrv/spir-v.vert.spv.bin", &vs_size);
-	size_t ps_size;
-	const uint32_t *ps =
-		(uint32_t *)filesystem::loadfile("vulkandrv/spir-v.frag.spv.bin", &ps_size);
-	RHIShaderStage tri_shader_stage[2];
-	tri_shader_stage[0].module = device->CreateShader(RHIShaderStageFlagBits::kVertex, vs, vs_size);
-	tri_shader_stage[0].pEntryPointName = "main";
-	tri_shader_stage[0].stage = RHIShaderStageFlagBits::kVertex;
-	tri_shader_stage[1].module = device->CreateShader(RHIShaderStageFlagBits::kFragment, ps, ps_size);
-	tri_shader_stage[1].pEntryPointName = "main";
-	tri_shader_stage[1].stage = RHIShaderStageFlagBits::kFragment;
-
-	vs = (uint32_t *)filesystem::loadfile("vulkandrv/spir-v-model.vert.spv.bin",
-										  &vs_size);
-	ps = (uint32_t *)filesystem::loadfile("vulkandrv/spir-v-model.frag.spv.bin",
-										  &ps_size);
-	RHIShaderStage quad_shader_stage[2];
-	quad_shader_stage[0].module = device->CreateShader(RHIShaderStageFlagBits::kVertex, vs, vs_size);
-	quad_shader_stage[0].pEntryPointName = "main";
-	quad_shader_stage[0].stage = RHIShaderStageFlagBits::kVertex;
-	quad_shader_stage[1].module = device->CreateShader(RHIShaderStageFlagBits::kFragment, ps, ps_size);
-	quad_shader_stage[1].pEntryPointName = "main";
-	quad_shader_stage[1].stage = RHIShaderStageFlagBits::kFragment;
+	// TODO: delete those after use
+	SShader* tri_shader = SShader::load(device, "vulkandrv/spir-v.vert.spv.bin",
+								  "vulkandrv/spir-v.frag.spv.bin");
+	SShader* quad_shader = SShader::load(device, "vulkandrv/spir-v-model.vert.spv.bin",
+								  "vulkandrv/spir-v-model.frag.spv.bin");
 
 	Image img;
 	const char *image_path = "./data/ut.bmp";
@@ -730,11 +710,11 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	IRHIPipelineLayout *pipeline_layout = device->CreatePipelineLayout(pipe_layout_desc, countof(pipe_layout_desc));
 
 	g_tri_pipeline = device->CreateGraphicsPipeline(
-		&tri_shader_stage[0], countof(tri_shader_stage), &tri_vi_state, &tri_ia_state,
+		tri_shader->stages_, countof(tri_shader->stages_), &tri_vi_state, &tri_ia_state,
 		&viewport_state, &raster_state, &ms_state, &blend_state, pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
 
 	g_quad_pipeline = device->CreateGraphicsPipeline(
-		&quad_shader_stage[0], countof(quad_shader_stage), &quad_vi_state, &quad_ia_state,
+		quad_shader->stages_, countof(quad_shader->stages_), &quad_vi_state, &quad_ia_state,
 		&viewport_state, &raster_state, &ms_state, &blend_state, pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
 
 	g_world_model_pipeline = device->CreateGraphicsPipeline(
