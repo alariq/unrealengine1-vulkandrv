@@ -855,6 +855,7 @@ public:
   virtual void Destroy(IRHIDevice *device) = 0;
   virtual void *Map(IRHIDevice *device, uint32_t offset, uint32_t size, uint32_t map_flags) = 0;
   virtual void Unmap(IRHIDevice *device) = 0;
+  virtual void Flush(IRHIDevice* device, uint32_t offset, uint32_t size) = 0;
   virtual uint32_t Size() const = 0;
 
   virtual ~IRHIBuffer() = 0; 
@@ -926,6 +927,7 @@ public:
 
 	virtual bool OnWindowSizeChanged(uint32_t width, uint32_t height, bool fullscreen) = 0;
     virtual void SetOnSwapChainRecreatedCallback(fpOnSwapChainRecreated callback, void* user_ptr) = 0;
+    virtual void WaitIdle() = 0;
 };
 #if 0
 struct RenderContext {

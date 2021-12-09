@@ -1139,6 +1139,22 @@ void RHIBufferVk::Unmap(IRHIDevice* device) {
     is_mapped_ = false;
 }
 
+void RHIBufferVk::Flush(IRHIDevice* device, uint32_t offset, uint32_t size) {
+	assert(is_mapped_);
+	assert(offset + size <= mapped_size_);
+
+	RHIDeviceVk* dev = ResourceCast(device);
+
+    VkMappedMemoryRange flush_range = {
+      VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,            // VkStructureType        sType
+      nullptr,                                          // const void            *pNext
+      backing_mem_,                                     // VkDeviceMemory         memory
+      offset,                                   // VkDeviceSize           offset
+      size// VkDeviceSize           size
+    };
+	vkFlushMappedMemoryRanges(dev->Handle(), 1, &flush_range);
+}
+
 /////////////////////// Fence //////////////////////////////////////////////////
 void RHIFenceVk::Reset(IRHIDevice *device) {
 	RHIDeviceVk *dev = ResourceCast(device);
@@ -2305,5 +2321,9 @@ bool RHIDeviceVk::OnWindowSizeChanged(uint32_t width, uint32_t height, bool full
 	}
 
 	return true;
+}
+
+void RHIDeviceVk::WaitIdle() {
+	vkDeviceWaitIdle(dev_.device_);
 }
 

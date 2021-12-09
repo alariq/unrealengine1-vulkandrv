@@ -224,6 +224,7 @@ public:
 
     void* Map(IRHIDevice* device, uint32_t offset, uint32_t size, uint32_t map_flags);
     void Unmap(IRHIDevice* device);
+    void Flush(IRHIDevice* device, uint32_t offset, uint32_t size);
 
     uint32_t Size() const { return buf_size_; }
 	VkBuffer Handle() const { return handle_; }
@@ -428,5 +429,7 @@ public:
 		fp_swap_chain_recreated_ = callback;
 		user_ptr_ = user_ptr;
 	}
+
+    virtual void WaitIdle() override;
 };
 
