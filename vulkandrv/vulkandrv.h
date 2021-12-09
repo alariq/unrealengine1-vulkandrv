@@ -3,8 +3,10 @@
 #pragma warning(push)
 #pragma warning(disable:4595)
 
+#pragma pack(push, 4)
 #include "Engine.h"
 #include "UnRender.h"
+#pragma pack(pop)
 
 #pragma warning(pop)
 
