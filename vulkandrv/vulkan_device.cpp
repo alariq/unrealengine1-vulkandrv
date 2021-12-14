@@ -1957,7 +1957,7 @@ IRHIDescriptorSet* RHIDeviceVk::AllocateDescriptorSet(const IRHIDescriptorSetLay
 			}
 		}
 
-		uint32_t MaxSets = num2alloc + 10; // future proof :-)
+		uint32_t MaxSets = num2alloc + 1000; // future proof :-)
 		VkDescriptorPoolCreateInfo ci = {};
 		ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 		ci.pNext = nullptr;

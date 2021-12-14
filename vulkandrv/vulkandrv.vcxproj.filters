@@ -1898,5 +1898,11 @@
     <CustomBuild Include="shaders\spir-v-world-model.vert">
       <Filter>shaders</Filter>
     </CustomBuild>
+    <CustomBuild Include="shaders\complex-surface.frag">
+      <Filter>shaders</Filter>
+    </CustomBuild>
+    <CustomBuild Include="shaders\complex-surface.vert">
+      <Filter>shaders</Filter>
+    </CustomBuild>
   </ItemGroup>
 </Project>

@@ -54,6 +54,12 @@ struct SimpleVertex {
     vec4 color;
     vec2 uv;
 };
+struct UEVertexComplex {
+	vec3 Pos;
+	vec2 TexCoord;
+	//uint32_t Flags;
+};
+
 struct PerFrameUniforms {
 	vec4 stuff;
 	mat4 fake_camera;
@@ -63,6 +69,15 @@ struct PerFrameUniforms {
 	mat4 normal_tr;
 	mat4 vwp;
 };
+
+struct UEPerDrawCallUniformBuf {
+	mat4 world;
+};
+
+struct UEPerFrameUniformBuf {
+	mat4 proj;
+};
+
 mat4 g_current_projection = mat4::identity();
 RHIViewport g_current_viewport;
 
@@ -71,6 +86,9 @@ RHIVertexInputBindingDesc vert_bindings_desc[] = {
 
 RHIVertexInputBindingDesc svd_vert_bindings_desc[] = {
 	{0, sizeof(SVD), RHIVertexInputRate::kVertex}};
+
+RHIVertexInputBindingDesc ue_complex_vert_bindings_desc[] = {
+	{0, sizeof(UEVertexComplex), RHIVertexInputRate::kVertex}};
 
 RHIVertexInputAttributeDesc va_desc[] = {
 	{0, vert_bindings_desc[0].binding, RHIFormat::kR32G32B32A32_SFLOAT,
@@ -87,6 +105,12 @@ RHIVertexInputAttributeDesc world_model_va_desc[] = {
 	 offsetof(SVD, normal)},
 	{2, svd_vert_bindings_desc[0].binding, RHIFormat::kR32G32_SFLOAT,
 	 offsetof(SVD, uv)}};
+
+RHIVertexInputAttributeDesc ue_complex_va_desc[] = {
+	{0, ue_complex_va_desc[0].binding, RHIFormat::kR32G32B32_SFLOAT,
+	 offsetof(UEVertexComplex, Pos)},
+	{1, ue_complex_va_desc[0].binding, RHIFormat::kR32G32_SFLOAT,
+	 offsetof(UEVertexComplex, TexCoord)}};
 
 // Create Test Vertex Buffer
 SimpleVertex vb[] = {{{-0.55f, -0.55f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
@@ -110,6 +134,10 @@ struct SBuffer {
 	IRHIBuffer* staging_buf_ = nullptr;
 	IRHIEvent* copy_event_ = nullptr;
 	BufType_t type_ = kUnknown;
+	uint32_t size_ = 0;
+	void* mapped_buf_= 0;
+
+	void* getMappedPtr() const { return mapped_buf_; }
 
 	static SBuffer* makeIB(IRHIDevice* dev, uint32_t size, const void* data) {
 		SBuffer* b = make(dev, size, RHIBufferUsageFlagBits::kIndexBufferBit, data);
@@ -125,6 +153,7 @@ struct SBuffer {
 
 	static SBuffer* make(IRHIDevice* dev, uint32_t size, uint32_t usage, const void* data) {
 		SBuffer* buf = new SBuffer();
+		buf->size_ = size;
 
 		buf->device_buf_ = dev->CreateBuffer(
 			size, RHIBufferUsageFlagBits::kTransferDstBit | usage,
@@ -135,19 +164,26 @@ struct SBuffer {
 							 RHIMemoryPropertyFlagBits::kHostVisible, RHISharingMode::kExclusive);
 		assert(buf->staging_buf_);
 
+		buf->mapped_buf_ = buf->staging_buf_->Map(dev, 0, size, 0);
+		
 		if (data) {
-			uint8_t* memptr = (uint8_t*)buf->staging_buf_->Map(dev, 0, size, 0);
-			memcpy(memptr, data, size);
-			buf->staging_buf_->Unmap(dev);
+			buf->CopyToStaging(dev, 0, size, data);
 		}
 
 		buf->copy_event_ = dev->CreateEvent();
 
 		return buf;
 	}
+	
+	void CopyToStaging(IRHIDevice* dev, uint32_t offset, uint32_t size, const void* data) {
+		assert(data);
+		uint64_t size64 = (uint64_t)offset + (uint64_t)size;
+		assert(size64 <= (uint64_t)size_);
+		memcpy((uint8_t*)getMappedPtr() + offset, data, size);
+	}
 
 	void CopyToGPU(IRHIDevice* dev, IRHICmdBuf* cb) {
-		if (!copy_event_->IsSet(dev)) {
+		//if (!copy_event_->IsSet(dev)) {
 			cb->CopyBuffer(device_buf_, 0, staging_buf_, 0, staging_buf_->Size());
 			RHIAccessFlags dst_acc_flags;
 			RHIPipelineStageFlags::Value dst_pipe_stage;
@@ -166,10 +202,15 @@ struct SBuffer {
 			cb->BufferBarrier(device_buf_, (uint32_t)RHIAccessFlagBits::kTransferWrite,
 							  RHIPipelineStageFlags::kTransfer, dst_acc_flags, dst_pipe_stage);
 			cb->SetEvent(copy_event_, dst_pipe_stage);
-		}
+		//}
 	}
 
 	bool IsReady(IRHIDevice* dev) const { return copy_event_->IsSet(dev); }
+
+	void Destroy(IRHIDevice* dev) {
+		staging_buf_->Unmap(dev);
+		// destroy buffers...
+	}
 };
 
 
@@ -224,11 +265,44 @@ SBuffer* g_cube_ib = nullptr;
 SBuffer* g_cube_vb = nullptr;
 SShader* g_cube_shader = nullptr;
 
+IRHISampler* g_test_sampler = nullptr;
+
+struct ComplexSurfaceDrawCall {
+	uint32_t vb_offset;
+	uint32_t num_vertices;
+	uint32_t ib_offset;
+	uint32_t num_indices;
+	IRHIDescriptorSet* dset;
+};
+
+const uint32_t gUENumVert = 1024 * 1024;
+const uint32_t gUENumIndices = 1024 * 1024;
+SBuffer* g_ue_vb[kNumBufferedFrames] = { 0 };
+uint32_t g_ue_vb_size[kNumBufferedFrames] = { 0 };
+SBuffer* g_ue_ib[kNumBufferedFrames] = { 0 };
+uint32_t g_ue_ib_size[kNumBufferedFrames] = { 0 };
+SShader* g_ue_complex_shader = nullptr;
+IRHIGraphicsPipeline *g_ue_pipeline = nullptr;
+
+IRHIDescriptorSetLayout* g_ue_ds_layout = 0;
+std::vector<IRHIDescriptorSet*> g_ue_dsets[kNumBufferedFrames];
+// NOTE: do not actually need to make this kNumBufferedFrames array
+int g_ue_dsets_reserved[kNumBufferedFrames] = { 0 };
+std::vector<ComplexSurfaceDrawCall> g_draw_calls;
+
+// UEPerDrawCallUniformBuf 
+const uint32_t gUEDrawCalls = 1000;
+IRHIBuffer* g_ue_per_draw_call_uniforms[kNumBufferedFrames] = { 0 };
+uint32_t g_ue_per_draw_call_uniforms_count[kNumBufferedFrames] = { 0 };
+// UEPerFrameUniformBuf 
+IRHIBuffer* g_ue_per_frame_uniforms[kNumBufferedFrames] = { 0 };
+UEPerFrameUniformBuf* g_ue_per_frame_uniforms_ptr[kNumBufferedFrames] = { 0 };
+
 
 void update_uniform_staging_buf(int idx, IRHIDevice* dev) {
 	assert(idx >= 0 && idx < kNumBufferedFrames);
 
-	PerFrameUniforms* uniptr = (PerFrameUniforms*)g_uniform_staging_buffer[idx]->Map(dev, 0, -1, 0);
+	PerFrameUniforms* uniptr = (PerFrameUniforms*)g_uniform_staging_buffer[idx]->Map(dev, 0, 0xFFFFFFFF, 0);
 	uniptr->stuff = vec4(1, -2, 3, -3.1415f);
 	uniptr->fake_camera = mat4::rotationZ(45.0f * M_PI / 180.0f);
 	static float angle = 30.0f * M_PI / 180.0f;
@@ -249,6 +323,12 @@ void update_uniform_staging_buf(int idx, IRHIDevice* dev) {
 
 	// no need to unmap in vulkan (but we flush in unmap, maybe move it to the separate function)
 	g_uniform_staging_buffer[idx]->Unmap(dev);
+}
+
+void ue_update_per_frame_uniforms(int idx, IRHIDevice* dev) {
+	assert(idx >= 0 && idx < kNumBufferedFrames);
+	g_ue_per_frame_uniforms_ptr[idx]->proj = g_current_projection;
+	g_ue_per_frame_uniforms[idx]->Flush(dev, 0, sizeof(UEPerFrameUniformBuf));
 }
 
 /**
@@ -441,6 +521,30 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 
 	g_quad_vb_copy_event = device->CreateEvent();
 
+	// create ue geometry buffers (one per swap chain len)
+	for (int i = 0; i < kNumBufferedFrames; ++i) {
+		g_ue_vb[i] = SBuffer::makeVB(device, gUENumVert* sizeof(UEVertexComplex), nullptr);
+		g_ue_vb_size[i] = 0;
+		g_ue_ib[i] = SBuffer::makeIB(device, gUENumIndices* sizeof(UEVertexComplex), nullptr);
+		g_ue_ib_size[i] = 0;
+
+		// TODO: check flags
+		g_ue_per_draw_call_uniforms[i] = device->CreateBuffer(
+			sizeof(UEPerDrawCallUniformBuf)*gUEDrawCalls, RHIBufferUsageFlagBits::kUniformBufferBit,
+			RHIMemoryPropertyFlagBits::kHostVisible, RHISharingMode::kExclusive);
+		g_ue_per_draw_call_uniforms_count[i] = 0;
+
+		// TODO: check flags
+		g_ue_per_frame_uniforms[i] = device->CreateBuffer(
+			sizeof(UEPerFrameUniformBuf), RHIBufferUsageFlagBits::kUniformBufferBit,
+			RHIMemoryPropertyFlagBits::kHostVisible, RHISharingMode::kExclusive);
+		g_ue_per_frame_uniforms_ptr[i] =
+			(UEPerFrameUniformBuf*)g_ue_per_frame_uniforms[i]->Map(device, 0, 0xFFFFFFFF, 0);
+	}
+	g_ue_complex_shader = SShader::load(device, "vulkandrv/complex-surface.vert.spv.bin",
+										"vulkandrv/complex-surface.frag.spv.bin");
+
+
 	RHIAttachmentDesc att_desc;
 	att_desc.format = device->GetSwapChainFormat();
 	att_desc.numSamples = 1;
@@ -584,6 +688,12 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	world_model_vi_state.vertexAttributeDescCount = countof(world_model_va_desc);
 	world_model_vi_state.pVertexAttributeDesc = world_model_va_desc;
 
+	RHIVertexInputState ue_vi_state;
+	ue_vi_state.vertexBindingDescCount = countof(ue_complex_vert_bindings_desc);
+	ue_vi_state.pVertexBindingDesc = ue_complex_vert_bindings_desc;
+	ue_vi_state.vertexAttributeDescCount = countof(ue_complex_va_desc);
+	ue_vi_state.pVertexAttributeDesc = ue_complex_va_desc;
+
 	RHIInputAssemblyState tri_ia_state;
 	tri_ia_state.primitiveRestartEnable = false;
 	tri_ia_state.topology = RHIPrimitiveTopology::kTriangleList;
@@ -595,6 +705,10 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	RHIInputAssemblyState tris_ia_state;
 	tris_ia_state.primitiveRestartEnable = false;
 	tris_ia_state.topology = RHIPrimitiveTopology::kTriangleList;
+
+	RHIInputAssemblyState ue_ia_state;
+	ue_ia_state.primitiveRestartEnable = false;
+	ue_ia_state.topology = RHIPrimitiveTopology::kTriangleFan;
 
 	RHIScissor scissors;
 	scissors.x = 0;
@@ -631,6 +745,9 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	RHIRasterizationState world_model_raster_state = raster_state;
 	world_model_raster_state.frontFace = RHIFrontFace::kCounterClockwise;
 
+	RHIRasterizationState ue_raster_state = raster_state;
+	ue_raster_state.frontFace = RHIFrontFace::kClockwise;
+
 	RHIMultisampleState ms_state;
 	ms_state.alphaToCoverageEnable = false;
 	ms_state.alphaToOneEnable = false;
@@ -661,6 +778,15 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 		{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment | RHIShaderStageFlagBits::kVertex, 1, 2}
 	};
 
+	RHIDescriptorSetLayoutDesc ue_dsl_desc[] = {
+		{RHIDescriptorType::kCombinedImageSampler, RHIShaderStageFlagBits::kFragment, 1, 0},
+		// per frame
+		{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment | RHIShaderStageFlagBits::kVertex, 1, 1},
+		// per draw call
+		{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment | RHIShaderStageFlagBits::kVertex, 1, 2}
+	};
+
+
 	RHISamplerDesc sampler_desc;
 	sampler_desc.magFilter = RHIFilter::kLinear;
 	sampler_desc.minFilter = RHIFilter::kLinear;
@@ -676,7 +802,7 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	sampler_desc.minLod = 0;
 	sampler_desc.maxLod = 10;
 	sampler_desc.unnormalizedCoordinates = false;
-	IRHISampler* test_sampler = device->CreateSampler(sampler_desc);
+	g_test_sampler = device->CreateSampler(sampler_desc);
 	IRHISampler* test_sampler2 = device->CreateSampler(sampler_desc);
 
 	g_uniform_buffer = device->CreateBuffer(
@@ -693,21 +819,27 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	}
 	g_uniform_buffer_copy_event = device->CreateEvent();
 
+
 	g_my_layout = device->CreateDescriptorSetLayout(dsl_desc, countof(dsl_desc));
+	g_ue_ds_layout = device->CreateDescriptorSetLayout(ue_dsl_desc, countof(ue_dsl_desc));
 	g_my_ds_set0 = device->AllocateDescriptorSet(g_my_layout);
 	g_my_ds_set1 = device->AllocateDescriptorSet(g_my_layout);
 
 	RHIDescriptorWriteDesc desc_write_desc[4];
 	RHIDescriptorWriteDescBuilder builder(desc_write_desc, countof(desc_write_desc));
-	builder.add(g_my_ds_set0, 0, test_sampler)
-		.add(g_my_ds_set0, 1, test_sampler, RHIImageLayout::kShaderReadOnlyOptimal, g_test_image_view)
+	builder.add(g_my_ds_set0, 0, g_test_sampler)
+		.add(g_my_ds_set0, 1, g_test_sampler, RHIImageLayout::kShaderReadOnlyOptimal, g_test_image_view)
 		.add(g_my_ds_set0, 2, g_uniform_buffer, 0, sizeof(PerFrameUniforms));
-		//.add(g_my_ds_set1, 0, test_sampler2);// .add(g_my_ds_set1, 2, g_uniform_buffer, 0, sizeof(PerFrameUniforms))
+		//.add(g_my_ds_set1, 0, g_test_sampler2);// .add(g_my_ds_set1, 2, g_uniform_buffer, 0, sizeof(PerFrameUniforms))
 		;
 	device->UpdateDescriptorSet(desc_write_desc, builder.cur_index);
 
+
 	const IRHIDescriptorSetLayout* pipe_layout_desc[] = { g_my_layout, g_my_layout };
 	IRHIPipelineLayout *pipeline_layout = device->CreatePipelineLayout(pipe_layout_desc, countof(pipe_layout_desc));
+
+	const IRHIDescriptorSetLayout* ue_pipe_layout_desc[] = { g_ue_ds_layout };
+	IRHIPipelineLayout *ue_pipeline_layout = device->CreatePipelineLayout(ue_pipe_layout_desc, countof(ue_pipe_layout_desc));
 
 	g_tri_pipeline = device->CreateGraphicsPipeline(
 		tri_shader->stages_, countof(tri_shader->stages_), &tri_vi_state, &tri_ia_state,
@@ -720,6 +852,11 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	g_world_model_pipeline = device->CreateGraphicsPipeline(
 		g_cube_shader->stages_, countof(g_cube_shader->stages_), &world_model_vi_state, &tris_ia_state,
 		&viewport_state, &world_model_raster_state, &ms_state, &blend_state, pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
+
+	g_ue_pipeline = device->CreateGraphicsPipeline(
+		g_ue_complex_shader->stages_, countof(g_ue_complex_shader->stages_), &ue_vi_state,
+		&ue_ia_state, &viewport_state, &ue_raster_state, &ms_state, &blend_state,
+		ue_pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
 
 	if (!UVulkanRenderDevice::SetRes(NewX, NewY, NewColorBytes, Fullscreen)) {
 		GError->Log(L"Init: SetRes failed.");
@@ -919,7 +1056,7 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 		ivec4 render_area(0, 0, fb_image->Width(), fb_image->Height());
 		RHIClearValue clear_value = { vec4(0,1,0, 0), 0.0f, 0 };
 		cb->BeginRenderPass(g_main_pass, cur_fb, &render_area, &clear_value, 1);
-
+                              
 		const IRHIDescriptorSet* sets[] = { g_my_ds_set0, g_my_ds_set1 };
 		cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_tri_pipeline->Layout(), sets, countof(sets));
 		cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_tri_pipeline);
@@ -954,7 +1091,6 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 			cb->Draw(g_cube_vb->device_buf_->Size()/sizeof(SVD), 1, 0, 0);
 		}
 
-		cb->EndRenderPass(g_main_pass, cur_fb);
 	}
 
 	sanity_lock_cnt++;
@@ -965,7 +1101,36 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 	IRHIDevice* dev = g_vulkan_device;
 	assert(1 == sanity_lock_cnt);
 
+	IRHIFrameBuffer *cur_fb = g_main_fb[g_curFBIdx];
 	IRHICmdBuf* cb = g_cmdbuf[g_curCBIdx];
+
+	if (!g_draw_calls.empty()) {
+
+		g_ue_vb[g_curFBIdx]->CopyToGPU(dev, cb);
+		g_ue_ib[g_curFBIdx]->CopyToGPU(dev, cb);
+
+		ue_update_per_frame_uniforms(g_curCBIdx, dev);
+
+		cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_ue_pipeline);
+		cb->BindIndexBuffer(g_ue_ib[g_curFBIdx]->device_buf_, 0, RHIIndexType::kUint32);
+		cb->BindVertexBuffers(&g_ue_vb[g_curFBIdx]->device_buf_, 0, 1);
+
+		const int num_draw_calls = (int)g_draw_calls.size();
+		for (int i = 0; i < num_draw_calls; i++) {
+			RHIDescriptorWriteDesc desc_write_desc[4];
+			RHIDescriptorWriteDescBuilder builder(desc_write_desc, countof(desc_write_desc));
+			builder.add(g_draw_calls[i].dset, 0, g_test_sampler, RHIImageLayout::kShaderReadOnlyOptimal, g_test_image_view)
+				.add(g_draw_calls[i].dset, 1, g_ue_per_frame_uniforms[g_curFBIdx], 0, sizeof(UEPerFrameUniformBuf));
+			dev->UpdateDescriptorSet(desc_write_desc, builder.cur_index);
+
+			const IRHIDescriptorSet* sets[] = { g_draw_calls[i].dset };
+			cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_ue_pipeline->Layout(), sets, countof(sets));
+			dev->WaitIdle();
+			cb->DrawIndexed(g_draw_calls[i].num_indices, 1, g_draw_calls[i].ib_offset, 0, 0);
+		}
+	}
+
+	cb->EndRenderPass(g_main_pass, cur_fb);
 	cb->End();
 	dev->Submit(cb, RHIQueueType::kGraphics);
 
@@ -979,14 +1144,135 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 		log_error("EndFrame failed\n");
 	}
 
+	g_ue_vb_size[g_curFBIdx] = 0;
+	g_ue_ib_size[g_curFBIdx] = 0;
+	g_ue_dsets_reserved[g_curFBIdx] = 0;
+	g_draw_calls.resize(0);
+
 	g_curCBIdx = (g_curCBIdx  + 1) % ((int)dev->GetNumBufferedFrames());
 	g_curFBIdx = (g_curFBIdx  + 1) % ((int)g_main_fb.size());
 
 	sanity_lock_cnt--;
 }
+
+/**
+Complex surfaces are used for map geometry. They consist of facets which in turn consist of polys (triangle fans).
+\param Frame The scene. See SetSceneNode().
+\param Surface Holds information on the various texture passes and the surface's PolyFlags.
+	- PolyFlags contains the correct flags for this surface. See polyflags.h
+	- Texture is the diffuse texture.
+	- DetailTexture is the nice close-up detail that's modulated with the diffuse texture for walls. It's up to the renderer to only draw these on near surfaces.
+	- LightMap is the precalculated map lighting. Should be drawn with a -.5 pan offset.
+	- FogMap is precalculated fog. Should be drawn with a -.5 pan offset. Should be added, not modulated. Flags determine if it should be applied, see polyflags.h.
+	- MacroTexture is similar to a detail texture but for far away surfaces. Rarely used.
+\param Facet Contains coordinates and polygons.
+	- MapCoords are used to calculate texture coordinates. Involved. See code.
+	- Polys is a linked list of triangle fan arrays; each element is similar to the models used in DrawGouraudPolygon().
+	
+\note DetailTexture and FogMap are mutually exclusive; D3D10 renderer just uses seperate binds for them anyway.
+\note D3D10 renderer handles DetailTexture range in shader.
+\note Check if submitted polygons are valid (3 or more points).
+*/
 void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Surface, FSurfaceFacet& Facet)
 {
+
+
+	//Code from OpenGL renderer to calculate texture coordinates
+	FLOAT UDot = Facet.MapCoords.XAxis | Facet.MapCoords.Origin;
+	FLOAT VDot = Facet.MapCoords.YAxis | Facet.MapCoords.Origin;
+
+	const float UMult = 1.0f / (Surface.Texture->UScale * Surface.Texture->USize);
+	const float VMult = 1.0f / (Surface.Texture->VScale * Surface.Texture->VSize);
+
+	uint32_t Flags = Surface.PolyFlags;
+
+	uint32_t& cur_vb_idx = g_ue_vb_size[g_curFBIdx];
+	uint32_t& cur_ib_idx = g_ue_ib_size[g_curFBIdx];
+
+	//Draw each polygon
+	for(FSavedPoly* Poly=Facet.Polys; Poly; Poly=Poly->Next )
+	{
+		const uint32_t vb_offset = cur_vb_idx;
+		const uint32_t ib_offset = cur_ib_idx;
+		
+		if(Poly->NumPts < 3) //Skip invalid polygons
+			continue;
+
+		UEVertexComplex* VB = (UEVertexComplex*)g_ue_vb[g_curFBIdx]->getMappedPtr();
+		uint32_t* IB = (uint32_t*)g_ue_ib[g_curFBIdx]->getMappedPtr();
+
+		const int32_t num_verts = Poly->NumPts;
+		const int32_t num_indices_for_poly_fan = (num_verts - 2) * 3;
+
+		assert(cur_ib_idx + num_indices_for_poly_fan < gUENumIndices);
+		assert(cur_vb_idx + Poly->NumPts < gUENumVert);
+
+		// Generate fan indices
+		for (int i = 1; i < num_verts - 1; i++) {
+			IB[cur_ib_idx++] = cur_vb_idx ; // Center point
+			IB[cur_ib_idx++] = cur_vb_idx + i;
+			IB[cur_ib_idx++] = cur_vb_idx + i + 1;
+		}
+
+		// Generate fan vertices 
+		for (INT i = 0; i < num_verts; i++)
+		{
+			UEVertexComplex* v = VB + cur_vb_idx++;
+			
+			//Code from OpenGL renderer to calculate texture coordinates
+			FLOAT U = Facet.MapCoords.XAxis | Poly->Pts[i]->Point;
+			FLOAT V = Facet.MapCoords.YAxis | Poly->Pts[i]->Point;
+			FLOAT UCoord = U-UDot;
+			FLOAT VCoord = V-VDot;
+
+			//Diffuse texture coordinates
+			v->TexCoord.x = (UCoord-Surface.Texture->Pan.X)*UMult;
+			v->TexCoord.y = (VCoord-Surface.Texture->Pan.Y)*VMult;
+#if 0
+			if(Surface.LightMap)
+			{
+				//Lightmaps require pan correction of -.5
+				v->TexCoord[1].x = (UCoord-(Surface.LightMap->Pan.X-0.5f*Surface.LightMap->UScale) )*lightMap->multU; 
+				v->TexCoord[1].y = (VCoord-(Surface.LightMap->Pan.Y-0.5f*Surface.LightMap->VScale) )*lightMap->multV;
+			}
+			if(Surface.DetailTexture)
+			{
+				v->TexCoord[2].x = (UCoord-Surface.DetailTexture->Pan.X)*detail->multU; 
+				v->TexCoord[2].y = (VCoord-Surface.DetailTexture->Pan.Y)*detail->multV;
+			}
+			if(Surface.FogMap)
+			{
+				//Fogmaps require pan correction of -.5
+				v->TexCoord[3].x = (UCoord-(Surface.FogMap->Pan.X-0.5f*Surface.FogMap->UScale) )*fogMap->multU; 
+				v->TexCoord[3].y = (VCoord-(Surface.FogMap->Pan.Y-0.5f*Surface.FogMap->VScale) )*fogMap->multV;			
+			}
+			if(Surface.MacroTexture)
+			{
+				v->TexCoord[4].x = (UCoord-Surface.MacroTexture->Pan.X)*macro->multU; 
+				v->TexCoord[4].y = (VCoord-Surface.MacroTexture->Pan.Y)*macro->multV;			
+			}
+#endif		
+			//v->Flags = Flags;
+			v->Pos = *(vec3*)&Poly->Pts[i]->Point.X; //Position
+		}
+
+		ComplexSurfaceDrawCall dc;
+		dc.vb_offset = vb_offset;
+		dc.num_vertices = cur_vb_idx - vb_offset;
+		dc.ib_offset = ib_offset;
+		dc.num_indices = cur_ib_idx - ib_offset;
+		if (g_ue_dsets[g_curFBIdx].size() == (size_t)g_ue_dsets_reserved[g_curFBIdx]) {
+			g_ue_dsets[g_curFBIdx].push_back(
+				g_vulkan_device->AllocateDescriptorSet(g_ue_ds_layout));
+		}
+		dc.dset = g_ue_dsets[g_curFBIdx][g_ue_dsets_reserved[g_curFBIdx]];
+		g_ue_dsets_reserved[g_curFBIdx]++;
+		g_draw_calls.emplace_back(dc);
+	}
+
+
 }
+
 void UVulkanRenderDevice::DrawGouraudPolygon(FSceneNode* Frame, FTextureInfo& Info, FTransTexture** Pts, int NumPts, DWORD PolyFlags, FSpanBuffer* Span)
 {
 }
