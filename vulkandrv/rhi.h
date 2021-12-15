@@ -819,7 +819,9 @@ public:
 	virtual void Barrier_UndefinedToTransfer(IRHIImage *image) = 0;
 	virtual void Barrier_TransferToShaderRead(IRHIImage *image) = 0;
 
-	virtual void Clear(IRHIImage* image_in, const vec4& color, uint32_t img_aspect_bits) = 0;
+    virtual void Clear(IRHIImage *image_in, const vec4 &color, uint32_t img_aspect_bits,
+					   IRHIImage *ds_image_in, float depth, uint32_t stencil,
+					   uint32_t ds_img_aspect_bits) = 0;
 	virtual ~IRHICmdBuf() = 0;
 };
 

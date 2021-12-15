@@ -1095,7 +1095,7 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 	if (bClearScreen)
 	{
 		cb->Barrier_PresentToClear(fb_image);
-		cb->Clear(fb_image, color, (uint32_t)RHIImageAspectFlags::kColor);
+		cb->Clear(fb_image, color, (uint32_t)RHIImageAspectFlags::kColor, nullptr, 0.0f, 0, 0);
 		cb->Barrier_ClearToPresent(fb_image);
 	}
 	else
@@ -1165,7 +1165,7 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 	//		  (uint32_t)RHIImageAspectFlags::kDepth);
 
 	ivec4 render_area(0, 0, fb_image->Width(), fb_image->Height());
-	RHIClearValue clear_values[] = { {vec4(0, 1, 0, 0), 0.0f, 0}, {vec4(0, 1, 0, 0), 1.0f, 0} };
+	RHIClearValue clear_values[] = { {vec4(0, 255, 0, 0), 0.0f, 0}, {vec4(0, 0, 0, 0), 1.0f, 0} };
 	cb->BeginRenderPass(g_main_pass, cur_fb, &render_area, clear_values, (uint32_t)countof(clear_values));
 
 	const IRHIDescriptorSet* sets[] = { g_my_ds_set0, g_my_ds_set1 };

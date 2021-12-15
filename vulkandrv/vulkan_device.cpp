@@ -1404,11 +1404,13 @@ bool RHICmdBufVk::BeginRenderPass(IRHIRenderPass *i_rp, IRHIFrameBuffer *i_fb, c
     ra.extent.height = render_area->w;
 
     std::vector<VkClearValue> vk_clear_values(count);
+	// TODO: support fp render targets as well (maybe just have different overloaded BeginRenderPass
+	// or just pass clear values from the client code)
     for(uint32_t i=0; i<count; ++i) {
-        vk_clear_values[i].color.float32[0] = clear_values[i].colour.x;
-        vk_clear_values[i].color.float32[1] = clear_values[i].colour.y;
-        vk_clear_values[i].color.float32[2] = clear_values[i].colour.z;
-        vk_clear_values[i].color.float32[3] = clear_values[i].colour.w;
+        vk_clear_values[i].color.uint32[0] = (uint32_t)(clear_values[i].colour.x);
+        vk_clear_values[i].color.uint32[1] = (uint32_t)(clear_values[i].colour.y);
+        vk_clear_values[i].color.uint32[2] = (uint32_t)(clear_values[i].colour.z);
+        vk_clear_values[i].color.uint32[3] = (uint32_t)(clear_values[i].colour.w);
         vk_clear_values[i].depthStencil.depth = clear_values[i].depth;
         vk_clear_values[i].depthStencil.stencil = clear_values[i].stencil;
     }
@@ -1571,25 +1573,46 @@ void RHICmdBufVk::SetViewport(const RHIViewport* viewports, uint32_t count) {
 	vkCmdSetViewport(cb_, 0, count, vk_viewports.data());
 }
 
-void RHICmdBufVk::Clear(IRHIImage* image_in, const vec4& color, uint32_t img_aspect_bits) {
+void RHICmdBufVk::Clear(IRHIImage *image_in, const vec4 &color, uint32_t img_aspect_bits,
+						IRHIImage *ds_image_in, float depth, uint32_t stencil,
+						uint32_t ds_img_aspect_bits) {
 	assert(is_recording_);
+	if (image_in) {
 	VkImageAspectFlags clear_bits = translate_image_aspect(img_aspect_bits);
 
-	RHIImageVk* image = ResourceCast(image_in);
+		RHIImageVk *image = ResourceCast(image_in);
 	VkClearColorValue clear_color = {{color.x, color.y, color.z, color.w}};
 	// TODO: use image view for this?
 	VkImageSubresourceRange image_subresource_range = {
-		clear_bits,					// VkImageAspectFlags                     aspectMask
-		0,						   // uint32_t                               baseMipLevel
-		1,						   // uint32_t                               levelCount
-		0,						   // uint32_t                               baseArrayLayer
-		1						   // uint32_t                               layerCount
+			clear_bits, // VkImageAspectFlags                     aspectMask
+			0,			// uint32_t                               baseMipLevel
+			1,			// uint32_t                               levelCount
+			0,			// uint32_t                               baseArrayLayer
+			1			// uint32_t                               layerCount
 	};
 
 	assert(image->vk_layout_ == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-	vkCmdClearColorImage(cb_, image->Handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_color,
-						 1, &image_subresource_range);
+		vkCmdClearColorImage(cb_, image->Handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+							 &clear_color, 1, &image_subresource_range);
+	}
+
+	if (ds_image_in) {
+		VkImageAspectFlags ds_clear_bits = translate_image_aspect(ds_img_aspect_bits);
+		VkImageSubresourceRange ds_image_subresource_range = {
+			ds_clear_bits, // VkImageAspectFlags                     aspectMask
+			0,			// uint32_t                               baseMipLevel
+			1,			// uint32_t                               levelCount
+			0,			// uint32_t                               baseArrayLayer
+			1			// uint32_t                               layerCount
+		};
+		VkClearDepthStencilValue ds_clear;
+		ds_clear.depth = depth;
+		ds_clear.stencil = stencil;
+		RHIImageVk *ds_image = ResourceCast(ds_image_in);
+		vkCmdClearDepthStencilImage(cb_, ds_image->Handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+									&ds_clear, 1, &ds_image_subresource_range);
+	}
 }
 
 void RHICmdBufVk::Barrier_ClearToPresent(IRHIImage *image_in) {

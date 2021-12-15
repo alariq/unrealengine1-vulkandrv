@@ -312,7 +312,9 @@ public:
 
 	virtual bool End() ;
 	virtual void EndRenderPass(const IRHIRenderPass *i_rp, IRHIFrameBuffer *i_fb) ;
-	virtual void Clear(IRHIImage* image_in, const vec4& color, uint32_t img_aspect_bits) ;
+	virtual void Clear(IRHIImage *image_in, const vec4 &color, uint32_t img_aspect_bits,
+					   IRHIImage *ds_image_in, float depth, uint32_t stencil,
+					   uint32_t ds_img_aspect_bits);
 	virtual void BindPipeline(RHIPipelineBindPoint::Value bind_point, IRHIGraphicsPipeline* pipeline) ;
 	virtual void BindDescriptorSets(RHIPipelineBindPoint::Value bind_point,
 									const IRHIPipelineLayout* pipeline_layout,
