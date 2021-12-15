@@ -693,7 +693,8 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	img_desc.usage = RHIImageUsageFlagBits::SampledBit|RHIImageUsageFlagBits::TransferDstBit;
 	img_desc.sharingMode = RHISharingMode::kExclusive; // only in graphics queue
 
-	g_test_image = device->CreateImage(&img_desc, RHIImageLayout::kTransferDstOptimal,
+	//TODO: why do we need this initial image layout of it only can be undefined or preinitialized?
+	g_test_image = device->CreateImage(&img_desc, RHIImageLayout::kUndefined,
 									   RHIMemoryPropertyFlagBits::kDeviceLocal);
 	assert(g_test_image);
 

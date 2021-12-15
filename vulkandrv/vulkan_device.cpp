@@ -1138,6 +1138,7 @@ RHIBufferVk* RHIBufferVk::Create(IRHIDevice* device, uint32_t size, uint32_t usa
     buffer->handle_ = vk_buffer;
     buffer->backing_mem_ = vk_mem;
     buffer->buf_size_ = size;
+	buffer->buf_alloc_size_ = (uint32_t)buffer_memory_req.size;
     buffer->usage_flags_ = usage;
     buffer->mem_flags_ = memprops;
     buffer->is_mapped_ = false;
@@ -1157,7 +1158,9 @@ void *RHIBufferVk::Map(IRHIDevice* device, uint32_t offset, uint32_t size, uint3
 	assert((size==0xFFFFFFFF && offset==0) || this->buf_size_ >= offset + size);
 	assert(this->mem_flags_ & RHIMemoryPropertyFlagBits::kHostVisible);
 
-	uint32_t map_size = size == 0xFFFFFFFF ? this->buf_size_ : size;
+	// TODO: check also if we want to map amount which is smaller than map granularity
+	uint32_t map_size = size == 0xFFFFFFFF ? this->buf_alloc_size_ : size;
+	map_size = (map_size == buf_size_) ? this->buf_alloc_size_ : map_size;
 
 	RHIDeviceVk* dev = ResourceCast(device);
 	void *ptr;
@@ -1578,20 +1581,20 @@ void RHICmdBufVk::Clear(IRHIImage *image_in, const vec4 &color, uint32_t img_asp
 						uint32_t ds_img_aspect_bits) {
 	assert(is_recording_);
 	if (image_in) {
-	VkImageAspectFlags clear_bits = translate_image_aspect(img_aspect_bits);
+		VkImageAspectFlags clear_bits = translate_image_aspect(img_aspect_bits);
 
 		RHIImageVk *image = ResourceCast(image_in);
-	VkClearColorValue clear_color = {{color.x, color.y, color.z, color.w}};
-	// TODO: use image view for this?
-	VkImageSubresourceRange image_subresource_range = {
+		VkClearColorValue clear_color = {{color.x, color.y, color.z, color.w}};
+		// TODO: use image view for this?
+		VkImageSubresourceRange image_subresource_range = {
 			clear_bits, // VkImageAspectFlags                     aspectMask
 			0,			// uint32_t                               baseMipLevel
 			1,			// uint32_t                               levelCount
 			0,			// uint32_t                               baseArrayLayer
 			1			// uint32_t                               layerCount
-	};
+		};
 
-	assert(image->vk_layout_ == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+		assert(image->vk_layout_ == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
 		vkCmdClearColorImage(cb_, image->Handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 							 &clear_color, 1, &image_subresource_range);

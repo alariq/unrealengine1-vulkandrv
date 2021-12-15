@@ -92,7 +92,7 @@ public:
 			   VkImageLayout layout)
 		: IRHIImage(desc), handle_(image), mem_prop_flags_(mem_prop_flags), vk_layout_(layout) {} 
 	VkImage Handle() const { return handle_; }
-	//VkFormat Format() const { return vk_format_; }
+
 };
 
 
@@ -211,6 +211,8 @@ class RHIBufferVk : public IRHIBuffer {
     VkBuffer handle_;
     VkDeviceMemory backing_mem_;
     uint32_t buf_size_;
+	// actual amount of allocated mem, always more of equal to buf_size_
+    uint32_t buf_alloc_size_; 
     uint32_t usage_flags_;
     uint32_t mem_flags_;
 

@@ -67,7 +67,7 @@ static PFN_vkGetDeviceProcAddr g_gdpa = NULL;
 static VulkanDevice vk_dev;
 
 static const char* const s_validation_layers[] = {
-	//"VK_LAYER_KHRONOS_validation",
+	"VK_LAYER_KHRONOS_validation",
 	"VK_LAYER_LUNARG_standard_validation"
 };
 
