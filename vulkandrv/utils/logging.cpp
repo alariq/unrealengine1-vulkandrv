@@ -12,7 +12,9 @@
 
 #include "utils/logging.h"
 
+#pragma pack(push, 4)
 #include "Core.h"
+#pragma pack(pop)
 
 
 void debugs(logging::eLogCategory lc, char* s)
