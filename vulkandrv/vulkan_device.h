@@ -192,6 +192,7 @@ public:
 		   const RHIInputAssemblyState *input_assembly_state,
 		   const RHIViewportState *viewport_state, const RHIRasterizationState *raster_state,
 		   const RHIMultisampleState *multisample_state,
+		   const RHIDepthStencilState *depth_stencil_state,
 		   const RHIColorBlendState *color_blend_state, const IRHIPipelineLayout *pipleline_layout,
 		   const RHIDynamicState::Value* dynamic_state, const uint32_t dynamic_state_count,
 		   const IRHIRenderPass *render_pass);
@@ -398,6 +399,7 @@ public:
             const RHIVertexInputState *vertex_input_state,
             const RHIInputAssemblyState *input_assembly_state, const RHIViewportState *viewport_state,
             const RHIRasterizationState *raster_state, const RHIMultisampleState *multisample_state,
+			const RHIDepthStencilState* depth_stencil_state,
             const RHIColorBlendState *color_blend_state, const IRHIPipelineLayout *i_pipleline_layout,
             const RHIDynamicState::Value* dynamic_state, const uint32_t dynamic_state_count,
             const IRHIRenderPass *i_render_pass) ;

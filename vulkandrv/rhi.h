@@ -65,6 +65,9 @@ enum class RHIFormat : uint32_t {
     kB8G8R8A8_UINT,
     kB8G8R8A8_SRGB,
 
+    kD32_SFLOAT,
+    kD32_SFLOAT_S8_UINT,
+
 };
 #else
 #define RHIFormat VkFormat
@@ -330,7 +333,7 @@ struct RHICompareOp { enum Value: uint32_t {
 };
 };
 
-struct RHIStencilOp { enum: uint32_t {
+struct RHIStencilOp { enum Value: uint32_t {
     kKeep = 0,
     kZero = 1,
     kReplace = 2,
@@ -599,6 +602,16 @@ struct RHIVertexInputAttributeDesc {
     uint32_t    offset;
 };
 
+struct RHIStencilOpState {
+	RHIStencilOp::Value failOp;
+	RHIStencilOp::Value passOp;
+	RHIStencilOp::Value depthFailOp;
+	RHICompareOp::Value compareOp;
+	uint32_t compareMask;
+	uint32_t writeMask;
+	uint32_t reference;
+};
+
 struct RHIDescriptorSetLayoutDesc {
     RHIDescriptorType::Value type;
     RHIFlags    shader_stage_flags;
@@ -703,6 +716,18 @@ struct RHIColorBlendAttachmentState {
     uint32_t                  colorWriteMask; // RHIColorComponentFlags    
 };
 
+struct RHIDepthStencilState {
+	bool depthTestEnable;
+	bool depthWriteEnable;
+	RHICompareOp::Value depthCompareOp;
+	bool depthBoundsTestEnable;
+	bool stencilTestEnable;
+	RHIStencilOpState front;
+	RHIStencilOpState back;
+	float minDepthBounds;
+	float maxDepthBounds;
+};
+
 struct RHIColorBlendState {
 	bool logicOpEnable;
 	RHILogicOp::Value logicOp;
@@ -729,14 +754,18 @@ public:
     }
 	uint32_t Width() const { return desc_.width; }
 	uint32_t Height() const { return desc_.height; }
+	RHIFormat Format() const { return desc_.format; }
 
-    virtual ~IRHIImage() = 0;
+	virtual void Destroy(IRHIDevice *device) = 0;
 };
 
 class IRHIImageView {
 protected:
 public:
     virtual ~IRHIImageView() = 0;
+    virtual const IRHIImage* GetImage() const = 0;
+    virtual IRHIImage* GetImage() = 0;
+    virtual void Destroy(IRHIDevice *) = 0;
 };
 
 //
@@ -903,6 +932,7 @@ public:
             const RHIVertexInputState *vertex_input_state,
             const RHIInputAssemblyState *input_assembly_state, const RHIViewportState *viewport_state,
             const RHIRasterizationState *raster_state, const RHIMultisampleState *multisample_state,
+			const RHIDepthStencilState* depth_stencil_state,
             const RHIColorBlendState *color_blend_state, const IRHIPipelineLayout *i_pipleline_layout,
             const RHIDynamicState::Value* dynamic_state, const uint32_t dynamic_state_count,
             const IRHIRenderPass *i_render_pass) = 0;

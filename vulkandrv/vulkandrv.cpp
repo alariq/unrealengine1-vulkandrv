@@ -242,6 +242,7 @@ struct SShader {
 
 IRHIRenderPass* g_main_pass = nullptr;
 std::vector<IRHIFrameBuffer*> g_main_fb;
+std::vector<IRHIImageView*> g_main_ds;
 
 IRHIGraphicsPipeline *g_tri_pipeline = nullptr;
 IRHIGraphicsPipeline *g_quad_pipeline = nullptr;
@@ -329,6 +330,40 @@ void ue_update_per_frame_uniforms(int idx, IRHIDevice* dev) {
 	assert(idx >= 0 && idx < kNumBufferedFrames);
 	g_ue_per_frame_uniforms_ptr[idx]->proj = g_current_projection;
 	g_ue_per_frame_uniforms[idx]->Flush(dev, 0, sizeof(UEPerFrameUniformBuf));
+}
+
+IRHIImageView* create_depth(IRHIDevice* dev, int w, int h) {
+
+	RHIImageDesc img_desc;
+	img_desc.type = RHIImageType::k2D;
+	img_desc.format = RHIFormat::kD32_SFLOAT;
+    img_desc.width = w;
+    img_desc.height = h;
+    img_desc.depth = 1;
+    img_desc.arraySize = 1;
+    img_desc.numMips = 1;
+    img_desc.numSamples = RHISampleCount::k1Bit;
+	img_desc.tiling = RHIImageTiling::kOptimal;
+	img_desc.usage = RHIImageUsageFlagBits::DepthStencilAttachmentBit;
+	img_desc.sharingMode = RHISharingMode::kExclusive; // only in graphics queue
+
+	IRHIImage* ds = dev->CreateImage(&img_desc, RHIImageLayout::kUndefined,
+									   RHIMemoryPropertyFlagBits::kDeviceLocal);
+	assert(ds);
+
+	RHIImageViewDesc iv_desc;
+	iv_desc.image = ds;
+	iv_desc.viewType = RHIImageViewType::k2d;
+    iv_desc.format = img_desc.format;
+	iv_desc.subresourceRange.aspectMask = RHIImageAspectFlags::kDepth;
+	iv_desc.subresourceRange.baseArrayLayer = 0;
+	iv_desc.subresourceRange.baseMipLevel = 0;
+	iv_desc.subresourceRange.layerCount = 1;
+	iv_desc.subresourceRange.levelCount = 1;
+
+	IRHIImageView* ds_view = dev->CreateImageView(&iv_desc);
+	assert(ds_view);
+	return ds_view;
 }
 
 /**
@@ -544,24 +579,33 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	g_ue_complex_shader = SShader::load(device, "vulkandrv/complex-surface.vert.spv.bin",
 										"vulkandrv/complex-surface.frag.spv.bin");
 
+	RHIAttachmentDesc att_desc[2]; // color + depth
+	att_desc[0].format = device->GetSwapChainFormat();
+	att_desc[0].numSamples = 1;
+	att_desc[0].loadOp = RHIAttachmentLoadOp::kClear;
+	att_desc[0].storeOp = RHIAttachmentStoreOp::kStore;
+	att_desc[0].stencilLoadOp = RHIAttachmentLoadOp::kDoNotCare;
+	att_desc[0].stencilStoreOp = RHIAttachmentStoreOp::kDoNotCare;
+	att_desc[0].initialLayout = RHIImageLayout::kUndefined;
+	att_desc[0].finalLayout = RHIImageLayout::kPresent;
 
-	RHIAttachmentDesc att_desc;
-	att_desc.format = device->GetSwapChainFormat();
-	att_desc.numSamples = 1;
-	att_desc.loadOp = RHIAttachmentLoadOp::kClear;
-	att_desc.storeOp = RHIAttachmentStoreOp::kStore;
-	att_desc.stencilLoadOp = RHIAttachmentLoadOp::kDoNotCare;
-	att_desc.stencilStoreOp = RHIAttachmentStoreOp::kDoNotCare;
-	att_desc.initialLayout = RHIImageLayout::kUndefined;
-	att_desc.finalLayout = RHIImageLayout::kPresent;
+	att_desc[1].format = RHIFormat::kD32_SFLOAT;
+	att_desc[1].numSamples = 1;
+	att_desc[1].loadOp = RHIAttachmentLoadOp::kClear;
+	att_desc[1].storeOp = RHIAttachmentStoreOp::kDoNotCare;
+	att_desc[1].stencilLoadOp = RHIAttachmentLoadOp::kDoNotCare;
+	att_desc[1].stencilStoreOp = RHIAttachmentStoreOp::kDoNotCare; 
+	att_desc[1].initialLayout = RHIImageLayout::kUndefined;
+	att_desc[1].finalLayout = RHIImageLayout::kPresent; // ?
 
 	RHIAttachmentRef color_att_ref = {0, RHIImageLayout::kColorOptimal};
+	RHIAttachmentRef depth_att_ref = {1, RHIImageLayout::kDepthStencilOptimal};
 
 	RHISubpassDesc sp_desc;
 	sp_desc.bindPoint = RHIPipelineBindPoint::kGraphics;
 	sp_desc.colorAttachmentCount = 1;
 	sp_desc.colorAttachments = &color_att_ref;
-	sp_desc.depthStencilAttachment = nullptr;
+	sp_desc.depthStencilAttachment = &depth_att_ref;
 	sp_desc.inputAttachmentCount = 0;
 	sp_desc.inputAttachments = nullptr;
 	sp_desc.preserveAttachmentCount = 0;
@@ -588,8 +632,8 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	RHISubpassDependency sp_deps[] = { sp_dep0, sp_dep1 };
 
 	RHIRenderPassDesc rp_desc;
-	rp_desc.attachmentCount = 1;
-	rp_desc.attachmentDesc = &att_desc;
+	rp_desc.attachmentCount = countof(att_desc);
+	rp_desc.attachmentDesc = att_desc;
 	rp_desc.subpassCount = 1;
 	rp_desc.subpassDesc = &sp_desc;
 	rp_desc.dependencyCount = countof(sp_deps);
@@ -598,13 +642,20 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	g_main_pass = device->CreateRenderPass(&rp_desc);
 
 	g_main_fb.resize(device->GetSwapChainSize());
+	g_main_ds.resize(device->GetSwapChainSize());
 	for (size_t i = 0; i < g_main_fb.size(); ++i) {
 		IRHIImageView *view = device->GetSwapChainImageView(i);
+		// TODO: can get image from view
 		const IRHIImage *image = device->GetSwapChainImage(i);
+		IRHIImageView* ds_view = create_depth(device, image->Width(), image->Height());
+		assert(ds_view->GetImage()->Format() == att_desc[1].format);
+		g_main_ds[i] = ds_view;
+
+		IRHIImageView* att_arr[] = { view, ds_view };
 
 		RHIFrameBufferDesc fb_desc;
-		fb_desc.attachmentCount = 1;
-		fb_desc.pAttachments = &view;
+		fb_desc.attachmentCount = countof(att_arr);
+		fb_desc.pAttachments = att_arr;
 		fb_desc.width_ = image->Width();
 		fb_desc.height_ = image->Height();
 		fb_desc.layers_ = 1;
@@ -756,6 +807,25 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	ms_state.rasterizationSamples = 1;
 	ms_state.sampleShadingEnable = false;
 
+	RHIStencilOpState front_n_back;
+	front_n_back.failOp = RHIStencilOp::kKeep;
+	front_n_back.passOp = RHIStencilOp::kKeep;
+	front_n_back.depthFailOp = RHIStencilOp::kKeep;
+	front_n_back.compareOp = RHICompareOp::kAlways;
+	front_n_back.compareMask = 0;
+	front_n_back.writeMask = 0;
+	front_n_back.reference = 0;
+	RHIDepthStencilState ds_state;
+	ds_state.depthTestEnable = true;
+	ds_state.depthWriteEnable = true;
+	ds_state.depthCompareOp = RHICompareOp::kLessOrEqual;
+	ds_state.depthBoundsTestEnable = false;
+	ds_state.stencilTestEnable = false;
+	ds_state.front = front_n_back;
+	ds_state.back = front_n_back;
+	ds_state.minDepthBounds = 0;
+	ds_state.maxDepthBounds = 1;
+
 	RHIColorBlendAttachmentState blend_att_state;
 	blend_att_state.alphaBlendOp = RHIBlendOp::kAdd;
 	blend_att_state.colorBlendOp = RHIBlendOp::kAdd;
@@ -843,19 +913,22 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 
 	g_tri_pipeline = device->CreateGraphicsPipeline(
 		tri_shader->stages_, countof(tri_shader->stages_), &tri_vi_state, &tri_ia_state,
-		&viewport_state, &raster_state, &ms_state, &blend_state, pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
+		&viewport_state, &raster_state, &ms_state, &ds_state, &blend_state, pipeline_layout,
+		dyn_state, countof(dyn_state), g_main_pass);
 
 	g_quad_pipeline = device->CreateGraphicsPipeline(
 		quad_shader->stages_, countof(quad_shader->stages_), &quad_vi_state, &quad_ia_state,
-		&viewport_state, &raster_state, &ms_state, &blend_state, pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
+		&viewport_state, &raster_state, &ms_state, &ds_state, &blend_state, pipeline_layout,
+		dyn_state, countof(dyn_state), g_main_pass);
 
 	g_world_model_pipeline = device->CreateGraphicsPipeline(
-		g_cube_shader->stages_, countof(g_cube_shader->stages_), &world_model_vi_state, &tris_ia_state,
-		&viewport_state, &world_model_raster_state, &ms_state, &blend_state, pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
+		g_cube_shader->stages_, countof(g_cube_shader->stages_), &world_model_vi_state,
+		&tris_ia_state, &viewport_state, &world_model_raster_state, &ms_state, &ds_state,
+		&blend_state, pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
 
 	g_ue_pipeline = device->CreateGraphicsPipeline(
 		g_ue_complex_shader->stages_, countof(g_ue_complex_shader->stages_), &ue_vi_state,
-		&ue_ia_state, &viewport_state, &ue_raster_state, &ms_state, &blend_state,
+		&ue_ia_state, &viewport_state, &ue_raster_state, &ms_state, &ds_state, &blend_state,
 		ue_pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
 
 	if (!UVulkanRenderDevice::SetRes(NewX, NewY, NewColorBytes, Fullscreen)) {
@@ -1009,6 +1082,7 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 	IRHIImage* fb_image = dev->GetCurrentSwapChainImage();
 	IRHICmdBuf* cb = g_cmdbuf[g_curCBIdx];
 	IRHIFrameBuffer *cur_fb = g_main_fb[g_curFBIdx];
+	IRHIImageView* cur_ds = g_main_ds[g_curFBIdx];
 
 	cb->Begin();
 
@@ -1053,17 +1127,8 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 			b_cube_copied = true;
 		}
 
-		ivec4 render_area(0, 0, fb_image->Width(), fb_image->Height());
-		RHIClearValue clear_value = { vec4(0,1,0, 0), 0.0f, 0 };
-		cb->BeginRenderPass(g_main_pass, cur_fb, &render_area, &clear_value, 1);
-                              
-		const IRHIDescriptorSet* sets[] = { g_my_ds_set0, g_my_ds_set1 };
-		cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_tri_pipeline->Layout(), sets, countof(sets));
-		cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_tri_pipeline);
-		cb->SetViewport(&g_current_viewport, 1);
-		cb->Draw(3, 1, 0, 0);
-
 		update_uniform_staging_buf(g_curCBIdx, dev);
+
 		// update uniforms device buffer (using g_curCBIdx for indexing, assume they are
 		// synchronized and there are same numbers of both)
 		cb->CopyBuffer(g_uniform_buffer, 0, g_uniform_staging_buffer[g_curCBIdx], 0, sizeof(PerFrameUniforms));
@@ -1071,25 +1136,6 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 						  RHIPipelineStageFlags::kTransfer, (uint32_t)RHIAccessFlagBits::kUniformRead,
 						  RHIPipelineStageFlags::kVertexShader);
 		cb->SetEvent(g_uniform_buffer_copy_event, RHIPipelineStageFlags::kVertexShader);
-
-		// I think there is no need to wait as we schedule draw in the queue and all operations are sequential there
-		// only necessary if we want to do something on a host, but let it be here as an example
-		//if (g_quad_vb_copy_event->IsSet(dev) && g_img_copy_event->IsSet(dev) && g_uniform_buffer_copy_event->IsSet(dev)) 
-		{
-			cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_quad_pipeline->Layout(), sets, countof(sets));
-			cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_quad_pipeline);
-			cb->BindVertexBuffers(&g_quad_gpu_vb, 0, 1);
-			cb->Draw(4, 1, 0, 0);
-		}
-
-		{
-			cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_world_model_pipeline->Layout(), sets, countof(sets));
-			cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_world_model_pipeline);
-			//cb->BindIndexBuffer(g_cube_ib->device_buf_, 0, RHIIndexType::kUint32);
-			cb->BindVertexBuffers(&g_cube_vb->device_buf_, 0, 1);
-			//cb->DrawIndexed(g_cube_ib->device_buf_->Size()/sizeof(uint32_t), 1, 0, 0, 0);
-			cb->Draw(g_cube_vb->device_buf_->Size()/sizeof(SVD), 1, 0, 0);
-		}
 
 	}
 
@@ -1103,15 +1149,64 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 
 	IRHIFrameBuffer *cur_fb = g_main_fb[g_curFBIdx];
 	IRHICmdBuf* cb = g_cmdbuf[g_curCBIdx];
+	IRHIImage* fb_image = dev->GetCurrentSwapChainImage();
+	IRHIImageView* cur_ds = g_main_ds[g_curFBIdx];
 
 	if (!g_draw_calls.empty()) {
-
 		g_ue_vb[g_curFBIdx]->CopyToGPU(dev, cb);
 		g_ue_ib[g_curFBIdx]->CopyToGPU(dev, cb);
-
 		ue_update_per_frame_uniforms(g_curCBIdx, dev);
+	}
 
+	//cb->Barrier_PresentToClear(fb_image);
+	//cb->Barrier_PresentToClear(cur_ds->GetImage());
+	//vec4 color = vec4(1, 0, 0, 0);
+	//cb->Clear(fb_image, color, (uint32_t)RHIImageAspectFlags::kColor, cur_ds->GetImage(), 0.0f, 0,
+	//		  (uint32_t)RHIImageAspectFlags::kDepth);
+
+	ivec4 render_area(0, 0, fb_image->Width(), fb_image->Height());
+	RHIClearValue clear_values[] = { {vec4(0, 1, 0, 0), 0.0f, 0}, {vec4(0, 1, 0, 0), 1.0f, 0} };
+	cb->BeginRenderPass(g_main_pass, cur_fb, &render_area, clear_values, (uint32_t)countof(clear_values));
+
+	const IRHIDescriptorSet* sets[] = { g_my_ds_set0, g_my_ds_set1 };
+	if (0)
+	{
+		cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_tri_pipeline->Layout(), sets,
+			countof(sets));
+		cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_tri_pipeline);
+		cb->SetViewport(&g_current_viewport, 1);
+		cb->Draw(3, 1, 0, 0);
+	}
+
+	// I think there is no need to wait as we schedule draw in the queue and all operations are
+	// sequential there only necessary if we want to do something on a host, but let it be here as
+	// an example
+	// if (g_quad_vb_copy_event->IsSet(dev) && g_img_copy_event->IsSet(dev) &&
+	// g_uniform_buffer_copy_event->IsSet(dev))
+	if(0)
+	{
+		cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_quad_pipeline->Layout(), sets,
+							   countof(sets));
+		cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_quad_pipeline);
+		cb->SetViewport(&g_current_viewport, 1);
+		cb->BindVertexBuffers(&g_quad_gpu_vb, 0, 1);
+		cb->Draw(4, 1, 0, 0);
+	}
+	if(0)
+	{
+		cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_world_model_pipeline->Layout(),
+							   sets, countof(sets));
+		cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_world_model_pipeline);
+		cb->SetViewport(&g_current_viewport, 1);
+		// cb->BindIndexBuffer(g_cube_ib->device_buf_, 0, RHIIndexType::kUint32);
+		cb->BindVertexBuffers(&g_cube_vb->device_buf_, 0, 1);
+		// cb->DrawIndexed(g_cube_ib->device_buf_->Size()/sizeof(uint32_t), 1, 0, 0, 0);
+		cb->Draw(g_cube_vb->device_buf_->Size() / sizeof(SVD), 1, 0, 0);
+	}
+
+	if (!g_draw_calls.empty()) {
 		cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_ue_pipeline);
+		cb->SetViewport(&g_current_viewport, 1);
 		cb->BindIndexBuffer(g_ue_ib[g_curFBIdx]->device_buf_, 0, RHIIndexType::kUint32);
 		cb->BindVertexBuffers(&g_ue_vb[g_curFBIdx]->device_buf_, 0, 1);
 
@@ -1394,15 +1489,22 @@ void UVulkanRenderDevice::OnSwapChainRecreated(void* user_ptr) {
 	for (size_t i = 0; i < g_main_fb.size(); ++i) {
 		g_main_fb[i]->Destroy(dev);
 		g_main_fb[i] = nullptr;
+
+		g_main_ds[i]->GetImage()->Destroy(dev);
+		g_main_ds[i]->Destroy(dev);
 	}
 
 	for (size_t i = 0; i < g_main_fb.size(); ++i) {
 		IRHIImageView *view = dev->GetSwapChainImageView(i);
 		const IRHIImage *image = dev->GetSwapChainImage(i);
+		IRHIImageView* ds_view = create_depth(dev, image->Width(), image->Height());
+		g_main_ds[i] = ds_view;
+
+		IRHIImageView* att_arr[] = { view, ds_view };
 
 		RHIFrameBufferDesc fb_desc;
-		fb_desc.attachmentCount = 1;
-		fb_desc.pAttachments = &view;
+		fb_desc.attachmentCount = countof(att_arr);
+		fb_desc.pAttachments = att_arr;
 		fb_desc.width_ = image->Width();
 		fb_desc.height_ = image->Height();
 		fb_desc.layers_ = 1;

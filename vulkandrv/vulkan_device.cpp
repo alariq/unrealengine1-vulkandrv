@@ -57,6 +57,7 @@ VkFormat translate(RHIFormat fmt) {
 		VK_FORMAT_R32G32B32_UINT,	 VK_FORMAT_R32G32B32_SINT,	  VK_FORMAT_R32G32B32_SFLOAT,
 		VK_FORMAT_R32G32B32A32_UINT, VK_FORMAT_R32G32B32A32_SINT, VK_FORMAT_R32G32B32A32_SFLOAT,
 		VK_FORMAT_B8G8R8A8_UNORM,	 VK_FORMAT_B8G8R8A8_UINT,	  VK_FORMAT_B8G8R8A8_SRGB,
+		VK_FORMAT_D32_SFLOAT,		 VK_FORMAT_D32_SFLOAT_S8_UINT
 	};
 	assert((uint32_t)fmt < countof(formats));
 	return formats[(uint32_t)fmt];
@@ -85,6 +86,8 @@ RHIFormat untranslate(VkFormat fmt) {
 		case VK_FORMAT_B8G8R8A8_UNORM:return RHIFormat::kB8G8R8A8_UNORM;	 
         case VK_FORMAT_B8G8R8A8_UINT:return RHIFormat::kB8G8R8A8_UINT;	  
 		case VK_FORMAT_B8G8R8A8_SRGB:return RHIFormat::kB8G8R8A8_SRGB;
+		case VK_FORMAT_D32_SFLOAT:return RHIFormat::kD32_SFLOAT;
+		case VK_FORMAT_D32_SFLOAT_S8_UINT:return RHIFormat::kD32_SFLOAT_S8_UINT;
         default:
 		    assert(0 && "Incorrect format");
     		return RHIFormat::kUNDEFINED;
@@ -632,6 +635,20 @@ VkCompareOp translate_compare_op(RHICompareOp::Value compare_op) {
 	}
 }
 
+VkStencilOp translate_stencil_op(RHIStencilOp::Value op) {
+	VkStencilOp so[] = {VK_STENCIL_OP_KEEP,
+						VK_STENCIL_OP_ZERO,
+						VK_STENCIL_OP_REPLACE,
+						VK_STENCIL_OP_INCREMENT_AND_CLAMP,
+						VK_STENCIL_OP_DECREMENT_AND_CLAMP,
+						VK_STENCIL_OP_INVERT,
+						VK_STENCIL_OP_INCREMENT_AND_WRAP,
+						VK_STENCIL_OP_DECREMENT_AND_WRAP,
+						VK_STENCIL_OP_MAX_ENUM};
+	assert((uint32_t)op < countof(so));
+	return so[(uint32_t)op];
+}
+
 VkDescriptorType translate_desc_type(RHIDescriptorType::Value type) {
 	switch (type) {
 	case RHIDescriptorType::kSampler: return VK_DESCRIPTOR_TYPE_SAMPLER;
@@ -693,6 +710,7 @@ void RHIImageVk::Destroy(IRHIDevice* device) {
 	RHIDeviceVk* dev = ResourceCast(device);
 	vkDestroyImage(dev->Handle(), handle_, dev->Allocator());
 	// TODO: should we destroy image memory?
+	delete this;
 }
 
 //void RHIImageVk::SetImage(const rhi_vulkan::Image& image) {
@@ -704,6 +722,7 @@ void RHIImageVk::Destroy(IRHIDevice* device) {
 void RHIImageViewVk::Destroy(IRHIDevice* device) {
 	RHIDeviceVk* dev = ResourceCast(device);
 	vkDestroyImageView(dev->Handle(), handle_, dev->Allocator());
+	delete this;
 }
 
 ////////////// Sampler //////////////////////////////////////////////////
@@ -831,6 +850,7 @@ RHIGraphicsPipelineVk *RHIGraphicsPipelineVk::Create(
 	const RHIVertexInputState *vertex_input_state,
 	const RHIInputAssemblyState *input_assembly_state, const RHIViewportState *viewport_state,
 	const RHIRasterizationState *raster_state, const RHIMultisampleState *multisample_state,
+	const RHIDepthStencilState *depth_stencil_state,
 	const RHIColorBlendState *color_blend_state, const IRHIPipelineLayout *i_pipleline_layout,
     const RHIDynamicState::Value* dynamic_state, const uint32_t dynamic_state_count,
 	const IRHIRenderPass *i_render_pass) {
@@ -942,6 +962,39 @@ RHIGraphicsPipelineVk *RHIGraphicsPipelineVk::Create(
 		multisample_state->alphaToOneEnable			  // VkBool32 alphaToOneEnable
     };
 
+    VkStencilOpState front;
+	front.compareMask = depth_stencil_state->front.compareMask;
+	front.compareOp = translate_compare_op(depth_stencil_state->front.compareOp);
+	front.depthFailOp = translate_stencil_op(depth_stencil_state->front.depthFailOp);
+	front.failOp = translate_stencil_op(depth_stencil_state->front.failOp);
+	front.passOp = translate_stencil_op(depth_stencil_state->front.passOp);
+	front.reference = depth_stencil_state->front.reference;
+	front.writeMask = depth_stencil_state->front.writeMask;
+
+    VkStencilOpState back;
+	back.compareMask = depth_stencil_state->back.compareMask;
+	back.compareOp = translate_compare_op(depth_stencil_state->back.compareOp);
+	back.depthFailOp = translate_stencil_op(depth_stencil_state->back.depthFailOp);
+	back.failOp = translate_stencil_op(depth_stencil_state->back.failOp);
+	back.passOp = translate_stencil_op(depth_stencil_state->back.passOp);
+	back.reference = depth_stencil_state->back.reference;
+	back.writeMask = depth_stencil_state->back.writeMask;
+
+	const VkPipelineDepthStencilStateCreateInfo depth_stencil_state_create_info = {
+		VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+		nullptr, // pNext;
+		0,		 // flags;
+		depth_stencil_state->depthTestEnable,
+		depth_stencil_state->depthWriteEnable,
+		translate_compare_op(depth_stencil_state->depthCompareOp),
+		depth_stencil_state->depthBoundsTestEnable,
+		depth_stencil_state->stencilTestEnable,
+		front,
+		back,
+		depth_stencil_state->minDepthBounds,
+		depth_stencil_state->maxDepthBounds,
+	};
+
 	std::vector<VkPipelineColorBlendAttachmentState> arr_color_blend_attachment_state;
 	for (uint32_t i = 0; i < color_blend_state->attachmentCount; ++i) {
 		const RHIColorBlendAttachmentState* cb_state = color_blend_state->pAttachments + i;
@@ -1000,7 +1053,7 @@ RHIGraphicsPipelineVk *RHIGraphicsPipelineVk::Create(
       &viewport_state_create_info,                                  // const VkPipelineViewportStateCreateInfo       *pViewportState
       &rasterization_state_create_info,                             // const VkPipelineRasterizationStateCreateInfo  *pRasterizationState
       &multisample_state_create_info,                               // const VkPipelineMultisampleStateCreateInfo    *pMultisampleState
-      nullptr,                                                      // const VkPipelineDepthStencilStateCreateInfo   *pDepthStencilState
+      &depth_stencil_state_create_info,								// const VkPipelineDepthStencilStateCreateInfo   *pDepthStencilState
       &color_blend_state_create_info,                               // const VkPipelineColorBlendStateCreateInfo     *pColorBlendState
       &dyn_state_create_info,                                       // const VkPipelineDynamicStateCreateInfo        *pDynamicState
       playout ? playout->Handle() : VK_NULL_HANDLE,                 // VkPipelineLayout                               layout
@@ -2124,13 +2177,14 @@ IRHIGraphicsPipeline *RHIDeviceVk::CreateGraphicsPipeline(
 	const RHIVertexInputState *vertex_input_state,
 	const RHIInputAssemblyState *input_assembly_state, const RHIViewportState *viewport_state,
 	const RHIRasterizationState *raster_state, const RHIMultisampleState *multisample_state,
+	const RHIDepthStencilState* depth_stencil_state,
 	const RHIColorBlendState *color_blend_state, const IRHIPipelineLayout *i_pipleline_layout,
 	const RHIDynamicState::Value *dynamic_state, const uint32_t dynamic_state_count,
 	const IRHIRenderPass *i_render_pass) {
 
 	return RHIGraphicsPipelineVk::Create(this, shader_stage, shader_stage_count, vertex_input_state,
 										 input_assembly_state, viewport_state, raster_state,
-										 multisample_state, color_blend_state, i_pipleline_layout,
+										 multisample_state, depth_stencil_state, color_blend_state, i_pipleline_layout,
 										 dynamic_state, dynamic_state_count, i_render_pass);
 }
 
