@@ -1221,7 +1221,6 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 
 			const IRHIDescriptorSet* sets[] = { g_draw_calls[i].dset };
 			cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_ue_pipeline->Layout(), sets, countof(sets));
-			dev->WaitIdle();
 			cb->DrawIndexed(g_draw_calls[i].num_indices, 1, g_draw_calls[i].ib_offset, 0, 0);
 		}
 	}
