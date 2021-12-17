@@ -21,6 +21,7 @@
 //#include "texconverter.h"
 //#include "customflags.h"
 #include "misc.h"
+#include "texture_cache.h"
 //#include "vertexformats.h"
 //#include "shader_gouraudpolygon.h"
 //#include "shader_tile.h"
@@ -48,6 +49,8 @@ static LARGE_INTEGER perfCounterFreq;
 //static Shader_Tile *shader_Tile;
 //static Shader_ComplexSurface *shader_ComplexSurface;
 //static Shader_FogSurface *shader_FogSurface;
+
+static class TextureCache* g_texCache;
 
 struct SimpleVertex {
     vec4 pos;
@@ -267,6 +270,18 @@ SBuffer* g_cube_vb = nullptr;
 SShader* g_cube_shader = nullptr;
 
 IRHISampler* g_test_sampler = nullptr;
+#if 0
+struct ComplexDescriptorSetData {
+	IRHIImageView* diffuse_view;
+	// some other stuff
+
+	// dset created based on this data
+	IRHIDescriptorSet* dset;
+	bool operator=(const ComplexDescriptorSetData& dsd) {
+		return dsd.diffuse_view == diffuse_view;
+	}
+};
+#endif
 
 struct ComplexSurfaceDrawCall {
 	uint32_t vb_offset;
@@ -274,6 +289,7 @@ struct ComplexSurfaceDrawCall {
 	uint32_t ib_offset;
 	uint32_t num_indices;
 	IRHIDescriptorSet* dset;
+	const IRHIImageView* view;
 };
 
 const uint32_t gUENumVert = 1024 * 1024;
@@ -299,6 +315,9 @@ uint32_t g_ue_per_draw_call_uniforms_count[kNumBufferedFrames] = { 0 };
 IRHIBuffer* g_ue_per_frame_uniforms[kNumBufferedFrames] = { 0 };
 UEPerFrameUniformBuf* g_ue_per_frame_uniforms_ptr[kNumBufferedFrames] = { 0 };
 
+std::vector<TextureUploadTask> g_tex_upload_tasks;
+std::vector<TextureUploadTask> g_tex_upload_in_progress;
+//std::vector<TextureUploadTask> g_tex_upload_done;
 
 void update_uniform_staging_buf(int idx, IRHIDevice* dev) {
 	assert(idx >= 0 && idx < kNumBufferedFrames);
@@ -499,6 +518,8 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 		zFar = 65536.0f;
 	else
 		zFar = 32760.0f;
+
+	g_texCache = TextureCache::makeCache();
 	 
 	//Set parent options
 	URenderDevice::Viewport = InViewport;
@@ -1004,6 +1025,7 @@ UBOOL UVulkanRenderDevice::SetRes(INT NewX, INT NewY, INT NewColorBytes, UBOOL F
 
 void UVulkanRenderDevice::Exit()
 {
+	TextureCache::destroy(g_texCache);
 	delete g_vulkan_device;
 	vulkan_finalize();
 }
@@ -1140,6 +1162,7 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 
 	}
 
+
 	sanity_lock_cnt++;
 }
 
@@ -1152,6 +1175,21 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 	IRHICmdBuf* cb = g_cmdbuf[g_curCBIdx];
 	IRHIImage* fb_image = dev->GetCurrentSwapChainImage();
 	IRHIImageView* cur_ds = g_main_ds[g_curFBIdx];
+
+	for (int i = 0; i < g_tex_upload_tasks.size(); ++i) {
+		const TextureUploadTask &t = g_tex_upload_tasks[i];
+		cb->Barrier_UndefinedToTransfer(t.image);
+		cb->CopyBufferToImage2D(t.image, t.img_staging_buf);
+		cb->Barrier_TransferToShaderRead(t.image);
+		cb->SetEvent(t.img_copy_event, RHIPipelineStageFlags::kFragmentShader);
+		g_tex_upload_in_progress.push_back(t);
+	}
+	g_tex_upload_tasks.clear();
+
+	g_tex_upload_in_progress.erase(
+		std::remove_if(g_tex_upload_in_progress.begin(), g_tex_upload_in_progress.end(),
+					   [dev](const TextureUploadTask &t) { return t.img_copy_event->IsSet(dev); }),
+		g_tex_upload_in_progress.end());
 
 	if (!g_draw_calls.empty()) {
 		g_ue_vb[g_curFBIdx]->CopyToGPU(dev, cb);
@@ -1215,7 +1253,7 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 		for (int i = 0; i < num_draw_calls; i++) {
 			RHIDescriptorWriteDesc desc_write_desc[4];
 			RHIDescriptorWriteDescBuilder builder(desc_write_desc, countof(desc_write_desc));
-			builder.add(g_draw_calls[i].dset, 0, g_test_sampler, RHIImageLayout::kShaderReadOnlyOptimal, g_test_image_view)
+			builder.add(g_draw_calls[i].dset, 0, g_test_sampler, RHIImageLayout::kShaderReadOnlyOptimal, g_draw_calls[i].view)
 				.add(g_draw_calls[i].dset, 1, g_ue_per_frame_uniforms[g_curFBIdx], 0, sizeof(UEPerFrameUniformBuf));
 			dev->UpdateDescriptorSet(desc_write_desc, builder.cur_index);
 
@@ -1270,7 +1308,15 @@ Complex surfaces are used for map geometry. They consist of facets which in turn
 */
 void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Surface, FSurfaceFacet& Facet)
 {
-
+	const IRHIImageView* rhi_texture = nullptr;
+	if (!g_texCache->isCached(Surface.Texture->CacheID)) {
+		TextureUploadTask t;
+		g_texCache->cache(Surface.Texture, Surface.PolyFlags, g_vulkan_device, &t);
+		g_tex_upload_tasks.push_back(t);
+		rhi_texture = t.img_view;
+	} else {
+		rhi_texture = g_texCache->get(Surface.Texture->CacheID);
+	}
 
 	//Code from OpenGL renderer to calculate texture coordinates
 	FLOAT UDot = Facet.MapCoords.XAxis | Facet.MapCoords.Origin;
@@ -1356,6 +1402,7 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 		dc.num_vertices = cur_vb_idx - vb_offset;
 		dc.ib_offset = ib_offset;
 		dc.num_indices = cur_ib_idx - ib_offset;
+		dc.view = rhi_texture;
 		if (g_ue_dsets[g_curFBIdx].size() == (size_t)g_ue_dsets_reserved[g_curFBIdx]) {
 			g_ue_dsets[g_curFBIdx].push_back(
 				g_vulkan_device->AllocateDescriptorSet(g_ue_ds_layout));

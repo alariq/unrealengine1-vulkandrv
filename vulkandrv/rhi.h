@@ -141,6 +141,7 @@ struct RHIDependencyFlags { enum Value : uint32_t {
 #define RHIDependencyFlags VkDependencyFlags;
 #endif
 
+#define USE_ImageAspectFlags_TRANSLATION
 #if defined(USE_ImageAspectFlags_TRANSLATION)
 struct RHIImageAspectFlags { enum: uint32_t {
 	kColor = 0x1,
@@ -992,7 +993,7 @@ struct RHIDescriptorWriteDescBuilder {
 
 	RHIDescriptorWriteDescBuilder &add(const IRHIDescriptorSet *ds, int binding,
 									   const IRHISampler *sampler, RHIImageLayout::Value img_layout,
-									   IRHIImageView *img_view);
+									   const IRHIImageView *img_view);
 
 	RHIDescriptorWriteDescBuilder &add(const IRHIDescriptorSet *ds, int binding,
 									   const IRHIImageView *img_view,

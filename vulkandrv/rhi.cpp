@@ -57,7 +57,7 @@ RHIDescriptorWriteDescBuilder &RHIDescriptorWriteDescBuilder::add(const IRHIDesc
 																  int binding,
 																  const IRHISampler *sampler,
 																  RHIImageLayout::Value img_layout,
-																  IRHIImageView *img_view) {
+																  const IRHIImageView *img_view) {
 
 	assert(count_ > cur_index);
 	assert(sampler && img_view);
