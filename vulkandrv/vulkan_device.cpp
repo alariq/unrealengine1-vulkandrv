@@ -1353,7 +1353,8 @@ void RHICmdBufVk::BufferBarrier(IRHIBuffer *i_buffer, RHIAccessFlags src_acc_fla
 }
 
 bool RHICmdBufVk::Begin() {
-
+	assert(!is_recording_);
+	assert(!is_in_render_pass_);
 	VkCommandBufferBeginInfo cmd_buffer_begin_info = {
 		VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, // VkStructureType                        sType
 		nullptr,									 // const void                            *pNext
@@ -1368,6 +1369,8 @@ bool RHICmdBufVk::Begin() {
 }
 
 bool RHICmdBufVk::End() {
+	assert(is_recording_);
+	assert(!is_in_render_pass_);
 	if (vkEndCommandBuffer(cb_) != VK_SUCCESS) {
 		log_error("vkEndCommandBuffer: Could not record command buffers!\n");
 		return false;
