@@ -280,7 +280,7 @@
       <AdditionalIncludeDirectories>.\games\UnrealTournament\Core\Inc;..\..\..\3rdparty\vulkansdk\1.2.189.2\Include;./;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <StructMemberAlignment>Default</StructMemberAlignment>
       <LanguageStandard>stdcpp14</LanguageStandard>
-      <AdditionalOptions>/w34100 /w34189 /w34456 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/w34100 /w34189 /w34456 /we4715 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -931,6 +931,7 @@
     <ClInclude Include="misc.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="rhi.h" />
+    <ClInclude Include="texture_cache.h" />
     <ClInclude Include="utils\file_utils.h" />
     <ClInclude Include="utils\Image.h" />
     <ClInclude Include="utils\logging.h" />
@@ -997,6 +998,7 @@
     </ClCompile>
     <ClCompile Include="misc.cpp" />
     <ClCompile Include="rhi.cpp" />
+    <ClCompile Include="texture_cache.cpp" />
     <ClCompile Include="utils\file_utils.cpp" />
     <ClCompile Include="utils\Image.cpp" />
     <ClCompile Include="utils\logging.cpp" />
