@@ -1178,7 +1178,10 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 
 	for (int i = 0; i < g_tex_upload_tasks.size(); ++i) {
 		const TextureUploadTask &t = g_tex_upload_tasks[i];
-		cb->Barrier_UndefinedToTransfer(t.image);
+		if(t.is_update)
+			cb->Barrier_ShaderReadToTransfer(t.image);
+		else
+			cb->Barrier_UndefinedToTransfer(t.image);
 		cb->CopyBufferToImage2D(t.image, t.img_staging_buf);
 		cb->Barrier_TransferToShaderRead(t.image);
 		cb->SetEvent(t.img_copy_event, RHIPipelineStageFlags::kFragmentShader);
@@ -1186,6 +1189,7 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 	}
 	g_tex_upload_tasks.clear();
 
+	// TODO: cleanup task to reuse staging buffers and event, otherwise we'll eat up all memory very soon
 	g_tex_upload_in_progress.erase(
 		std::remove_if(g_tex_upload_in_progress.begin(), g_tex_upload_in_progress.end(),
 					   [dev](const TextureUploadTask &t) { return t.img_copy_event->IsSet(dev); }),
@@ -1315,7 +1319,16 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 		g_tex_upload_tasks.push_back(t);
 		rhi_texture = t.img_view;
 	} else {
+		if (Surface.Texture->bRealtimeChanged) {
+			TextureUploadTask t;
+			g_texCache->update(Surface.Texture, Surface.PolyFlags, g_vulkan_device, &t);
+		g_tex_upload_tasks.push_back(t);
+		}
 		rhi_texture = g_texCache->get(Surface.Texture->CacheID);
+	}
+	
+	if (Surface.Texture->bRealtimeChanged) {
+		assert(Surface.Texture->bRealtime);
 	}
 
 	//Code from OpenGL renderer to calculate texture coordinates

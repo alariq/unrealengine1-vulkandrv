@@ -253,12 +253,48 @@ bool TextureCache::cache(FTextureInfo *TexInfo, DWORD PolyFlags, IRHIDevice *dev
 	task->img_staging_buf = img_staging_buf;
 	task->img_copy_event = img_copy_event;
 	task->state = TextureUploadTask::kPending;
+	task->is_update = false; // we are creating it anew
 
 	tc->thash.insert(std::make_pair(TexInfo->CacheID, CachedTexture{ metadata, image, view}));
 
 	if (mip_data.b_owns_memory) {
 		delete[] mip_data.pSysMem;
 	}
+
+	return true;
+}
+
+bool TextureCache::update(const struct FTextureInfo* TexInfo, unsigned long PolyFlags,
+	class IRHIDevice* dev, struct TextureUploadTask* task) {
+
+	check(TexInfo->Format <= TEXF_RGBA8);
+	const TextureFormat &format = g_format_reg[(int)TexInfo->Format];
+	check(format.b_is_supported == true);
+
+	assert(tc->thash.count(TexInfo->CacheID));
+	CachedTexture ct = tc->thash[TexInfo->CacheID];
+
+	TextureMetaData metadata = buildMetaData(TexInfo, PolyFlags, 0);
+	MipInfo mip_data = convertMip(TexInfo, format, PolyFlags, 0);
+	assert(memcmp(&metadata, &ct.metadata, sizeof(TextureMetaData)) == 0);
+
+	IRHIBuffer *img_staging_buf =
+		dev->CreateBuffer(mip_data.size, RHIBufferUsageFlagBits::kTransferSrcBit,
+						  RHIMemoryPropertyFlagBits::kHostVisible, RHISharingMode::kExclusive);
+	assert(img_staging_buf);
+	//TODO: convert right into this staging buf
+	uint8_t *img_memptr = (uint8_t *)img_staging_buf->Map(dev, 0, mip_data.size, 0);
+	memcpy(img_memptr, mip_data.pSysMem, mip_data.size);
+	img_staging_buf->Unmap(dev);
+
+	IRHIEvent* img_copy_event = dev->CreateEvent();
+
+	task->image = ct.image;
+	task->img_view = ct.view;
+	task->img_staging_buf = img_staging_buf;
+	task->img_copy_event = img_copy_event;
+	task->state = TextureUploadTask::kPending;
+	task->is_update = true;
 
 	return true;
 }

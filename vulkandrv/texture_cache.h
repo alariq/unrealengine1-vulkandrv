@@ -6,6 +6,7 @@ struct TextureUploadTask {
 	class IRHIImageView* img_view;
 	class IRHIBuffer* img_staging_buf;
 	class IRHIEvent* img_copy_event;
+	bool is_update;
 	unsigned char state;
 };
 
@@ -22,4 +23,5 @@ public:
 	static TextureCache* makeCache();
 	static void destroy(TextureCache* );
 	bool cache(/*const*/ struct FTextureInfo* tex_info, unsigned long PolyFlags, class IRHIDevice* dev, struct TextureUploadTask* task);
+	bool update(const struct FTextureInfo* tex_info, unsigned long PolyFlags, class IRHIDevice* dev, struct TextureUploadTask* task);
 };
