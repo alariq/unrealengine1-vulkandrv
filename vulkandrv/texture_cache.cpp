@@ -162,7 +162,7 @@ const IRHIImageView* TextureCache::get(CacheKey_t id) const {
 	return tc->thash[id].view;
 }
 
-bool TextureCache::cache(FTextureInfo *TexInfo, DWORD PolyFlags, IRHIDevice *dev, TextureUploadTask* task) {
+bool TextureCache::cache(FTextureInfo *TexInfo, DWORD PolyFlags, IRHIDevice *dev, TextureUploadTask** task) {
 
 	// TODO: can't this just be an assert?
 	if (TexInfo->Format > TEXF_RGBA8) {
@@ -237,25 +237,9 @@ bool TextureCache::cache(FTextureInfo *TexInfo, DWORD PolyFlags, IRHIDevice *dev
 	IRHIImageView* view = dev->CreateImageView(&iv_desc);
 	assert(view);
 
-	IRHIBuffer *img_staging_buf =
-		dev->CreateBuffer(mip_data.size, RHIBufferUsageFlagBits::kTransferSrcBit,
-						  RHIMemoryPropertyFlagBits::kHostVisible, RHISharingMode::kExclusive);
-	assert(img_staging_buf);
-	//TODO: convert right into this staging buf
-	uint8_t *img_memptr = (uint8_t *)img_staging_buf->Map(dev, 0, mip_data.size, 0);
-	memcpy(img_memptr, mip_data.pSysMem, mip_data.size);
-	img_staging_buf->Unmap(dev);
-
-	IRHIEvent* img_copy_event = dev->CreateEvent();
-
-	task->image = image;
-	task->img_view = view;
-	task->img_staging_buf = img_staging_buf;
-	task->img_copy_event = img_copy_event;
-	task->state = TextureUploadTask::kPending;
-	task->is_update = false; // we are creating it anew
-
 	tc->thash.insert(std::make_pair(TexInfo->CacheID, CachedTexture{ metadata, image, view}));
+
+	*task = TextureUploadTask::make(image, view, false, mip_data.size, mip_data.pSysMem, dev);
 
 	if (mip_data.b_owns_memory) {
 		delete[] mip_data.pSysMem;
@@ -265,7 +249,7 @@ bool TextureCache::cache(FTextureInfo *TexInfo, DWORD PolyFlags, IRHIDevice *dev
 }
 
 bool TextureCache::update(const struct FTextureInfo* TexInfo, unsigned long PolyFlags,
-	class IRHIDevice* dev, struct TextureUploadTask* task) {
+						  class IRHIDevice *dev, struct TextureUploadTask **task) {
 
 	check(TexInfo->Format <= TEXF_RGBA8);
 	const TextureFormat &format = g_format_reg[(int)TexInfo->Format];
@@ -278,23 +262,11 @@ bool TextureCache::update(const struct FTextureInfo* TexInfo, unsigned long Poly
 	MipInfo mip_data = convertMip(TexInfo, format, PolyFlags, 0);
 	assert(memcmp(&metadata, &ct.metadata, sizeof(TextureMetaData)) == 0);
 
-	IRHIBuffer *img_staging_buf =
-		dev->CreateBuffer(mip_data.size, RHIBufferUsageFlagBits::kTransferSrcBit,
-						  RHIMemoryPropertyFlagBits::kHostVisible, RHISharingMode::kExclusive);
-	assert(img_staging_buf);
-	//TODO: convert right into this staging buf
-	uint8_t *img_memptr = (uint8_t *)img_staging_buf->Map(dev, 0, mip_data.size, 0);
-	memcpy(img_memptr, mip_data.pSysMem, mip_data.size);
-	img_staging_buf->Unmap(dev);
+	*task = TextureUploadTask::make(ct.image, ct.view, true, mip_data.size, mip_data.pSysMem, dev);
 
-	IRHIEvent* img_copy_event = dev->CreateEvent();
-
-	task->image = ct.image;
-	task->img_view = ct.view;
-	task->img_staging_buf = img_staging_buf;
-	task->img_copy_event = img_copy_event;
-	task->state = TextureUploadTask::kPending;
-	task->is_update = true;
+	if (mip_data.b_owns_memory) {
+		delete[] mip_data.pSysMem;
+	}
 
 	return true;
 }
@@ -310,3 +282,75 @@ void TextureCache::destroy(TextureCache *tc) {
 	//...
 	delete tc;
 }
+////////////////////////////////////////////////////////////////////////////////
+// TextureUploadTask 
+////////////////////////////////////////////////////////////////////////////////
+
+// NOTE: maybe just have a single array of tasks and mark them as busy/free and instead return task
+// index drawback is that then search will be linear and not binary as we will not be able to
+// shuffle array to sort it to not invalidate indices
+ 
+// TODO: vector is not the best adt for this
+// Invariant: should be always sorted
+static std::vector<TextureUploadTask*> g_taskCache;
+
+TextureUploadTask *TextureUploadTask::make(class IRHIImage *image, class IRHIImageView *img_view,
+										   bool is_update, int size, const DWORD*data,
+										   IRHIDevice *dev) {
+	TextureUploadTask* task = nullptr;
+	for (int i = 0; i < (int)g_taskCache.size(); ++i)
+	{
+		if (g_taskCache[i]->img_staging_buf->Size() >= size) {
+			task = g_taskCache[i];
+			g_taskCache.erase(g_taskCache.begin() + i);
+			break;
+		}
+	}
+
+	if (!task) {
+		task = new TextureUploadTask;
+		task->img_copy_event = dev->CreateEvent();;
+		task->img_staging_buf =
+			dev->CreateBuffer(size, RHIBufferUsageFlagBits::kTransferSrcBit,
+							  RHIMemoryPropertyFlagBits::kHostVisible, RHISharingMode::kExclusive);
+		task->img_staging_buf->Map(dev, 0, size, 0);
+	}
+
+	// initialize
+
+	task->image = image;
+	task->img_view = img_view;
+	task->size = size;
+	task->is_update = is_update;
+	task->state = kPending;
+
+	//TODO: convert right into this staging buf
+	memcpy((uint8_t*)task->img_staging_buf->MappedPtr(), data, size);
+	// never unmap
+	//img_staging_buf->Unmap(dev);
+
+	return task;
+}
+
+void TextureUploadTask::release() {
+	img_view = nullptr;
+	image = nullptr;
+	state = kInvalid;
+	size = -1;
+	is_update = false;
+
+	g_taskCache.push_back(this);
+}
+
+// supposed to be called only at the game end / device recreation
+// TODO: release memory, otherwise will leak at device recreation
+void TextureUploadTask::destroy() {
+	state = kInvalid;
+	delete this;
+}
+
+TextureUploadTask::~TextureUploadTask() {
+	//g_taskCache.push_back(task);
+}
+
+

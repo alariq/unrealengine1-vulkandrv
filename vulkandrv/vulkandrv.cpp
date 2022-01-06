@@ -315,8 +315,8 @@ uint32_t g_ue_per_draw_call_uniforms_count[kNumBufferedFrames] = { 0 };
 IRHIBuffer* g_ue_per_frame_uniforms[kNumBufferedFrames] = { 0 };
 UEPerFrameUniformBuf* g_ue_per_frame_uniforms_ptr[kNumBufferedFrames] = { 0 };
 
-std::vector<TextureUploadTask> g_tex_upload_tasks;
-std::vector<TextureUploadTask> g_tex_upload_in_progress;
+std::vector<TextureUploadTask*> g_tex_upload_tasks;
+std::vector<TextureUploadTask*> g_tex_upload_in_progress;
 //std::vector<TextureUploadTask> g_tex_upload_done;
 
 void update_uniform_staging_buf(int idx, IRHIDevice* dev) {
@@ -1171,29 +1171,34 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 	IRHIDevice* dev = g_vulkan_device;
 	assert(1 == sanity_lock_cnt);
 
-	IRHIFrameBuffer *cur_fb = g_main_fb[g_curFBIdx];
+	IRHIFrameBuffer* cur_fb = g_main_fb[g_curFBIdx];
 	IRHICmdBuf* cb = g_cmdbuf[g_curCBIdx];
 	IRHIImage* fb_image = dev->GetCurrentSwapChainImage();
 	IRHIImageView* cur_ds = g_main_ds[g_curFBIdx];
 
 	for (int i = 0; i < g_tex_upload_tasks.size(); ++i) {
-		const TextureUploadTask &t = g_tex_upload_tasks[i];
-		if(t.is_update)
-			cb->Barrier_ShaderReadToTransfer(t.image);
+		TextureUploadTask* t = g_tex_upload_tasks[i];
+		if (t->is_update)
+			cb->Barrier_ShaderReadToTransfer(t->image);
 		else
-			cb->Barrier_UndefinedToTransfer(t.image);
-		cb->CopyBufferToImage2D(t.image, t.img_staging_buf);
-		cb->Barrier_TransferToShaderRead(t.image);
-		cb->SetEvent(t.img_copy_event, RHIPipelineStageFlags::kFragmentShader);
+			cb->Barrier_UndefinedToTransfer(t->image);
+		cb->CopyBufferToImage2D(t->image, t->img_staging_buf);
+		cb->Barrier_TransferToShaderRead(t->image);
+		cb->SetEvent(t->img_copy_event, RHIPipelineStageFlags::kFragmentShader);
 		g_tex_upload_in_progress.push_back(t);
 	}
 	g_tex_upload_tasks.clear();
 
-	// TODO: cleanup task to reuse staging buffers and event, otherwise we'll eat up all memory very soon
-	g_tex_upload_in_progress.erase(
-		std::remove_if(g_tex_upload_in_progress.begin(), g_tex_upload_in_progress.end(),
-					   [dev](const TextureUploadTask &t) { return t.img_copy_event->IsSet(dev); }),
-		g_tex_upload_in_progress.end());
+	// move finished tasks to the end
+	auto it = std::remove_if(g_tex_upload_in_progress.begin(), g_tex_upload_in_progress.end(),
+		[dev](const TextureUploadTask* t) { return t->img_copy_event->IsSet(dev); });
+	// release them
+	for (auto i = it; i < g_tex_upload_in_progress.end(); ++i)
+	{
+		(*i)->release();
+	}
+	// and clear array
+	g_tex_upload_in_progress.erase(it, g_tex_upload_in_progress.end());
 
 	if (!g_draw_calls.empty()) {
 		g_ue_vb[g_curFBIdx]->CopyToGPU(dev, cb);
@@ -1314,13 +1319,13 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 {
 	const IRHIImageView* rhi_texture = nullptr;
 	if (!g_texCache->isCached(Surface.Texture->CacheID)) {
-		TextureUploadTask t;
+		TextureUploadTask* t;
 		g_texCache->cache(Surface.Texture, Surface.PolyFlags, g_vulkan_device, &t);
 		g_tex_upload_tasks.push_back(t);
-		rhi_texture = t.img_view;
+		rhi_texture = t->img_view;
 	} else {
 		if (Surface.Texture->bRealtimeChanged) {
-			TextureUploadTask t;
+			TextureUploadTask* t;
 			g_texCache->update(Surface.Texture, Surface.PolyFlags, g_vulkan_device, &t);
 		g_tex_upload_tasks.push_back(t);
 		}
