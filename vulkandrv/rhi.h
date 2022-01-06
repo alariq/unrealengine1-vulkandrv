@@ -890,6 +890,7 @@ public:
   virtual void Unmap(IRHIDevice *device) = 0;
   virtual void Flush(IRHIDevice* device, uint32_t offset, uint32_t size) = 0;
   virtual uint32_t Size() const = 0;
+  virtual void* MappedPtr() const = 0;
 
   virtual ~IRHIBuffer() = 0; 
 };

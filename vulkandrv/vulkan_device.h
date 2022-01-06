@@ -215,6 +215,7 @@ class RHIBufferVk : public IRHIBuffer {
     uint32_t buf_alloc_size_; 
     uint32_t usage_flags_;
     uint32_t mem_flags_;
+	void* mapped_address_;
 
     bool is_mapped_;
     uint32_t mapped_offset_;
@@ -229,6 +230,7 @@ public:
     void Unmap(IRHIDevice* device);
     void Flush(IRHIDevice* device, uint32_t offset, uint32_t size);
 
+	void* MappedPtr() const { assert(is_mapped_); return mapped_address_; }
     uint32_t Size() const { return buf_size_; }
 	VkBuffer Handle() const { return handle_; }
 };

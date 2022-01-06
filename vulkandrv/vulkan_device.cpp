@@ -1173,6 +1173,7 @@ void *RHIBufferVk::Map(IRHIDevice* device, uint32_t offset, uint32_t size, uint3
     mapped_offset_ = offset;
     mapped_size_ = map_size;
     mapped_flags_ = map_flags;
+	mapped_address_ = ptr;
 
     return ptr;
 }
@@ -1193,6 +1194,7 @@ void RHIBufferVk::Unmap(IRHIDevice* device) {
 
 	vkUnmapMemory(dev->Handle(), backing_mem_);
     is_mapped_ = false;
+	mapped_address_ = nullptr;
 }
 
 void RHIBufferVk::Flush(IRHIDevice* device, uint32_t offset, uint32_t size) {
