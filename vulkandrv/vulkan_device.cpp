@@ -1661,14 +1661,24 @@ void RHICmdBufVk::Barrier_UndefinedToTransfer(IRHIImage *image_in) {
 void RHICmdBufVk::Barrier_TransferToShaderRead(IRHIImage *image_in) {
 	RHIImageVk* image = ResourceCast(image_in);
 
-	assert(image->vk_access_flags_ = VK_ACCESS_TRANSFER_WRITE_BIT);
-	assert(image->vk_layout_ = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	assert(image->vk_access_flags_ == VK_ACCESS_TRANSFER_WRITE_BIT);
+	assert(image->vk_layout_ == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
 	Barrier(this->Handle(), image, VK_PIPELINE_STAGE_TRANSFER_BIT,
 			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT,
 			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
+void RHICmdBufVk::Barrier_ShaderReadToTransfer(IRHIImage *image_in) {
+	RHIImageVk* image = ResourceCast(image_in);
+
+	assert(image->vk_access_flags_ == VK_ACCESS_SHADER_READ_BIT);
+	assert(image->vk_layout_ == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+	Barrier(this->Handle(), image, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+}
 
 ////////////////RHI Device /////////////////////////////////////////////////////
 

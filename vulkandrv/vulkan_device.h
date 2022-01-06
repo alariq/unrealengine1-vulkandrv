@@ -286,6 +286,7 @@ public:
 	virtual void Barrier_DrawToPresent(IRHIImage* image) ;
 	virtual void Barrier_UndefinedToTransfer(IRHIImage* image);
 	virtual void Barrier_TransferToShaderRead(IRHIImage* image);
+	virtual void Barrier_ShaderReadToTransfer(IRHIImage* image);
 
 	virtual void BufferBarrier(IRHIBuffer *i_buffer, RHIAccessFlags src_acc_flags,
 							   RHIPipelineStageFlags::Value src_stage, RHIAccessFlags dst_acc_fags,
