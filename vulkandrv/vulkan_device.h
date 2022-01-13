@@ -423,6 +423,7 @@ public:
     // TODO: this should belong to the renderer
     virtual uint32_t GetNumBufferedFrames()  { return kNumBufferedFrames; }
     virtual uint32_t GetCurrentFrame() { return cur_frame_; }
+    virtual uint32_t GetCurrentSwapChainImageIndex() { return cur_swap_chain_img_idx_; }
 
 	virtual bool Submit(IRHICmdBuf* cb_in, RHIQueueType::Value queue_type) ;
 	virtual bool BeginFrame() ;

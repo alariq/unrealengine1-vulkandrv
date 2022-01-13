@@ -10,6 +10,7 @@
 #include <stdlib.h>     // for _itow 
 #include <new>
 #include <vector>
+#include <unordered_map>
 
 //#include "resource.h"
 #include "vulkandrv.h"
@@ -34,6 +35,10 @@ bool vulkan_initialize(HWND rw_handle);
 //UObject glue
 IMPLEMENT_PACKAGE(VulkanDrv);
 IMPLEMENT_CLASS(UVulkanRenderDevice);
+
+/**< RUNE:  This poly should be alpha blended. NOTE: as this uses the game-specific flag number, only check this for Rune */
+// This flag has same value as PF_BigWavy, so watch out for it and maybe interpret it only in case or Rune
+#define PF_AlphaBlend 0x00001000
 
 static bool drawingWeapon = false; /** Whether the depth buffer was cleared and projection parameters set to draw the weapon model */
 static bool drawingHUD = false;
@@ -82,7 +87,6 @@ struct UEPerFrameUniformBuf {
 };
 
 mat4 g_current_projection = mat4::identity();
-RHIViewport g_current_viewport;
 
 RHIVertexInputBindingDesc vert_bindings_desc[] = {
 	{0, sizeof(SimpleVertex), RHIVertexInputRate::kVertex}};
@@ -121,7 +125,6 @@ SimpleVertex vb[] = {{{-0.55f, -0.55f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 0.0f}, {0
 					 {{0.55f, -0.55f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
 					 {{0.55f, 0.55f, 0.0f, 1.0f}, {0.45f, 0.45f, 0.45f, 0.0f}, {1.0f, 1.0f}}};
 
-static int g_curCBIdx = 0;
 static int g_curFBIdx = 0;
 static IRHIDevice* g_vulkan_device = 0;
 static IRHICmdBuf* g_cmdbuf[kNumBufferedFrames] = { 0 };
@@ -283,6 +286,15 @@ struct ComplexDescriptorSetData {
 };
 #endif
 
+enum PipelineBlend : uint8_t {
+	kPipeBlendNo,
+	kPipeBlendModulated,
+	kPipeBlendTranslucent,
+	kPipeBlendAlpha,
+	kPipeBlendInvisible,
+	kPipeBlendCount
+};
+
 struct ComplexSurfaceDrawCall {
 	uint32_t vb_offset;
 	uint32_t num_vertices;
@@ -290,6 +302,8 @@ struct ComplexSurfaceDrawCall {
 	uint32_t num_indices;
 	IRHIDescriptorSet* dset;
 	const IRHIImageView* view;
+	PipelineBlend pipeline_blend;
+	bool b_depth_write;
 };
 
 const uint32_t gUENumVert = 1024 * 1024;
@@ -351,6 +365,26 @@ void ue_update_per_frame_uniforms(int idx, IRHIDevice* dev) {
 	g_ue_per_frame_uniforms[idx]->Flush(dev, 0, sizeof(UEPerFrameUniformBuf));
 }
 
+PipelineBlend select_blend(DWORD Flags) {
+	PipelineBlend rv = kPipeBlendNo;
+	if (Flags & PF_Invisible) {
+		rv = kPipeBlendInvisible;
+	} else if (Flags & PF_Translucent) {
+		rv = kPipeBlendTranslucent;
+	} else if (Flags & PF_Modulated) {
+		rv = kPipeBlendModulated;
+		// Rune specific, see PF_AlphaBlend
+	} else if (Flags & PF_AlphaBlend) {
+		rv = kPipeBlendAlpha;
+	}
+
+	return rv;
+}
+
+bool select_depth_write(DWORD Flags) {
+	return (Flags & PF_Occlude);
+}
+
 IRHIImageView* create_depth(IRHIDevice* dev, int w, int h) {
 
 	RHIImageDesc img_desc;
@@ -384,6 +418,43 @@ IRHIImageView* create_depth(IRHIDevice* dev, int w, int h) {
 	assert(ds_view);
 	return ds_view;
 }
+
+RHIColorBlendAttachmentState create_blend_att_state(bool b_enable, RHIBlendFactor::Value src, RHIBlendFactor::Value dst) {
+
+	RHIColorBlendAttachmentState blend_att_state;
+	blend_att_state.alphaBlendOp = RHIBlendOp::kAdd;
+	blend_att_state.colorBlendOp = RHIBlendOp::kAdd;
+	blend_att_state.blendEnable = b_enable;
+	blend_att_state.colorWriteMask =
+		(uint32_t)RHIColorComponentFlags::kR | (uint32_t)RHIColorComponentFlags::kG |
+		(uint32_t)RHIColorComponentFlags::kB | (uint32_t)RHIColorComponentFlags::kA;
+	blend_att_state.srcColorBlendFactor = src;
+	blend_att_state.dstColorBlendFactor = dst;
+	blend_att_state.srcAlphaBlendFactor = RHIBlendFactor::One;
+	blend_att_state.dstAlphaBlendFactor = RHIBlendFactor::Zero;
+	return blend_att_state;
+}
+
+static const RHIColorBlendAttachmentState no_blend_att_state = create_blend_att_state(false, RHIBlendFactor::One, RHIBlendFactor::Zero);
+static const RHIColorBlendAttachmentState modulated_blend_att_state = create_blend_att_state(true, RHIBlendFactor::SrcColor, RHIBlendFactor::DstColor);
+static const RHIColorBlendAttachmentState translucent_blend_att_state = create_blend_att_state(true, RHIBlendFactor::One, RHIBlendFactor::OneMinusSrcColor);
+static const RHIColorBlendAttachmentState alpha_blend_att_state = create_blend_att_state(true, RHIBlendFactor::SrcAlpha, RHIBlendFactor::OneMinusSrcAlpha);
+// TODO: just disable color writes, okay...
+static const RHIColorBlendAttachmentState indivisible_blend_att_state = create_blend_att_state(true, RHIBlendFactor::One, RHIBlendFactor::Zero);
+
+// create_blend_states
+static const RHIColorBlendState no_blend_state = { false, RHILogicOp::kCopy, 1, &no_blend_att_state, {0, 0, 0, 0}};
+static const RHIColorBlendState modulated_blend_state = { false, RHILogicOp::kCopy, 1, &modulated_blend_att_state, {0, 0, 0, 0}};
+static const RHIColorBlendState translucent_blend_state = { false, RHILogicOp::kCopy, 1, &translucent_blend_att_state, {0, 0, 0, 0}};
+static const RHIColorBlendState alpha_blend_state = { false, RHILogicOp::kCopy, 1, &alpha_blend_att_state, {0, 0, 0, 0}};
+static const RHIColorBlendState invisible_blend_state = { false, RHILogicOp::kCopy, 1, &indivisible_blend_att_state, {0, 0, 0, 0}};
+
+static const RHIColorBlendState * const g_blend_states[kPipeBlendCount] = {&no_blend_state, &modulated_blend_state,
+									  &translucent_blend_state, &alpha_blend_state,
+									  &invisible_blend_state};
+
+// Pipelines for different states
+std::unordered_map<uint32_t, IRHIGraphicsPipeline*> g_ue_pipelines;
 
 /**
 Attempts to read a property from the game's config file; on failure, a default is written (so it can be changed by the user) and returned.
@@ -520,6 +591,7 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 		zFar = 32760.0f;
 
 	g_texCache = TextureCache::makeCache();
+	texture_upload_task_init();
 	 
 	//Set parent options
 	URenderDevice::Viewport = InViewport;
@@ -552,7 +624,7 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	for (size_t i = 0; i < kNumBufferedFrames; ++i) {
 		g_cmdbuf[i] = device->CreateCommandBuffer(RHIQueueType::kGraphics);
 	}
-	g_curCBIdx = 0;
+	g_curFBIdx = -1;
 
 	SVDAdapter<> cube_data;
 	generate_cube(cube_data, vec3(1), vec3(0.0f));
@@ -786,8 +858,9 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	RHIScissor scissors;
 	scissors.x = 0;
 	scissors.y = 0;
-	scissors.width = (uint32_t)NewX;
-	scissors.height = (uint32_t)NewY;
+	// just "disable" it
+	scissors.width = (uint32_t)4096;
+	scissors.height = (uint32_t)4096;
 
 	RHIViewport viewport;
 	viewport.x = viewport.y = 0;
@@ -795,7 +868,6 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	viewport.height = (float)NewY;
 	viewport.minDepth = 0.0f;
 	viewport.maxDepth = 1.0f;
-	g_current_viewport = viewport;
 
 	RHIViewportState viewport_state;
 	viewport_state.pScissors = &scissors;
@@ -837,6 +909,8 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	front_n_back.compareMask = 0;
 	front_n_back.writeMask = 0;
 	front_n_back.reference = 0;
+
+
 	RHIDepthStencilState ds_state;
 	ds_state.depthTestEnable = true;
 	ds_state.depthWriteEnable = true;
@@ -848,19 +922,9 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	ds_state.minDepthBounds = 0;
 	ds_state.maxDepthBounds = 1;
 
-	RHIColorBlendAttachmentState blend_att_state;
-	blend_att_state.alphaBlendOp = RHIBlendOp::kAdd;
-	blend_att_state.colorBlendOp = RHIBlendOp::kAdd;
-	blend_att_state.blendEnable = false;
-	blend_att_state.colorWriteMask =
-		(uint32_t)RHIColorComponentFlags::kR | (uint32_t)RHIColorComponentFlags::kG |
-		(uint32_t)RHIColorComponentFlags::kB | (uint32_t)RHIColorComponentFlags::kA;
-	blend_att_state.srcColorBlendFactor = RHIBlendFactor::One;
-	blend_att_state.dstColorBlendFactor = RHIBlendFactor::Zero;
-	blend_att_state.srcAlphaBlendFactor = RHIBlendFactor::One;
-	blend_att_state.dstAlphaBlendFactor = RHIBlendFactor::Zero;
-
-	RHIColorBlendState blend_state = {false, RHILogicOp::kCopy, 1, &blend_att_state, {0, 0, 0, 0}};
+	const RHIDepthStencilState ds_write_state = ds_state;
+	RHIDepthStencilState ds_no_write_state = ds_state;
+	ds_no_write_state.depthWriteEnable = false;
 
 	RHIDynamicState::Value dyn_state[] = { RHIDynamicState::kViewport };
 
@@ -935,23 +999,38 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 
 	g_tri_pipeline = device->CreateGraphicsPipeline(
 		tri_shader->stages_, countof(tri_shader->stages_), &tri_vi_state, &tri_ia_state,
-		&viewport_state, &raster_state, &ms_state, &ds_state, &blend_state, pipeline_layout,
+		&viewport_state, &raster_state, &ms_state, &ds_state, &no_blend_state, pipeline_layout,
 		dyn_state, countof(dyn_state), g_main_pass);
 
 	g_quad_pipeline = device->CreateGraphicsPipeline(
 		quad_shader->stages_, countof(quad_shader->stages_), &quad_vi_state, &quad_ia_state,
-		&viewport_state, &raster_state, &ms_state, &ds_state, &blend_state, pipeline_layout,
+		&viewport_state, &raster_state, &ms_state, &ds_state, &no_blend_state, pipeline_layout,
 		dyn_state, countof(dyn_state), g_main_pass);
 
 	g_world_model_pipeline = device->CreateGraphicsPipeline(
 		g_cube_shader->stages_, countof(g_cube_shader->stages_), &world_model_vi_state,
 		&tris_ia_state, &viewport_state, &world_model_raster_state, &ms_state, &ds_state,
-		&blend_state, pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
+		&no_blend_state, pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
 
 	g_ue_pipeline = device->CreateGraphicsPipeline(
 		g_ue_complex_shader->stages_, countof(g_ue_complex_shader->stages_), &ue_vi_state,
-		&ue_ia_state, &viewport_state, &ue_raster_state, &ms_state, &ds_state, &blend_state,
+		&ue_ia_state, &viewport_state, &ue_raster_state, &ms_state, &ds_state, &no_blend_state,
 		ue_pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
+
+
+	for (uint8_t j = 0; j < 2; j++) {
+		const uint32_t dw_key = j;
+		const RHIDepthStencilState* depth_state = j ? &ds_write_state : &ds_no_write_state;
+		for (uint8_t i = 0; i < kPipeBlendCount; i++) {
+			IRHIGraphicsPipeline* pipeline = device->CreateGraphicsPipeline(
+				g_ue_complex_shader->stages_, countof(g_ue_complex_shader->stages_), &ue_vi_state,
+				&ue_ia_state, &viewport_state, &ue_raster_state, &ms_state, depth_state, g_blend_states[i],
+				ue_pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
+
+			uint32_t key = i | (j << 8);
+			g_ue_pipelines.insert(std::make_pair(key, pipeline));
+		}
+	}
 
 	if (!UVulkanRenderDevice::SetRes(NewX, NewY, NewColorBytes, Fullscreen)) {
 		GError->Log(L"Init: SetRes failed.");
@@ -996,7 +1075,9 @@ UBOOL UVulkanRenderDevice::SetRes(INT NewX, INT NewY, INT NewColorBytes, UBOOL F
 	log_info("SetRes: %d x %d\n", NewX, NewY, Fullscreen);
 
 	//Without BLIT_Direct3D major flickering occurs when switching from fullscreen to windowed.
-	UBOOL Result = URenderDevice::Viewport->ResizeViewport(Fullscreen ? (BLIT_Fullscreen|BLIT_Direct3D) : (BLIT_HardwarePaint|BLIT_Direct3D), NewX, NewY, NewColorBytes);
+	UBOOL Result = URenderDevice::Viewport->ResizeViewport(
+		Fullscreen ? (BLIT_Fullscreen | BLIT_Direct3D) : (BLIT_HardwarePaint | BLIT_Direct3D), NewX,
+		NewY, NewColorBytes);
 	if (!Result) 
 	{
 		GError->Log(L"SetRes: Error resizing viewport.");
@@ -1025,8 +1106,19 @@ UBOOL UVulkanRenderDevice::SetRes(INT NewX, INT NewY, INT NewColorBytes, UBOOL F
 
 void UVulkanRenderDevice::Exit()
 {
+	for (int i = 0; i < kNumBufferedFrames; ++i) {
+		g_ue_dsets[i].clear();
+		g_ue_dsets_reserved[i] = 0;
+	};
+
+	g_tex_upload_tasks.clear();
+	g_tex_upload_in_progress.clear();
+	texture_upload_task_fini();
+
 	TextureCache::destroy(g_texCache);
 	delete g_vulkan_device;
+	g_ue_pipelines.clear();
+	assert(g_draw_calls.size() == 0);
 	vulkan_finalize();
 }
 
@@ -1102,10 +1194,9 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 		log_error("BeginFrame failed\n");
 	}
 
-	IRHIImage* fb_image = dev->GetCurrentSwapChainImage();
-	IRHICmdBuf* cb = g_cmdbuf[g_curCBIdx];
-	IRHIFrameBuffer *cur_fb = g_main_fb[g_curFBIdx];
-	IRHIImageView* cur_ds = g_main_ds[g_curFBIdx];
+	g_curFBIdx = (int)dev->GetCurrentSwapChainImageIndex();
+
+	IRHICmdBuf* cb = g_cmdbuf[g_curFBIdx];
 
 	cb->Begin();
 
@@ -1114,34 +1205,20 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 	static vec4 color = vec4(1, 0, 0, 0);
 	color.x = 0.5f*sinf(2 * 3.1415f*sec) + 0.5f;
 
-	bool bClearScreen = false;
-	if (bClearScreen)
-	{
-		cb->Barrier_PresentToClear(fb_image);
-		cb->Clear(fb_image, color, (uint32_t)RHIImageAspectFlags::kColor, nullptr, 0.0f, 0, 0);
-		cb->Barrier_ClearToPresent(fb_image);
-	}
-	else
 	{
 		if (!g_quad_vb_copy_event->IsSet(dev)) {
-			static bool once = true;
-			assert(once);
 			cb->CopyBuffer(g_quad_gpu_vb, 0, g_quad_staging_vb, 0, g_quad_staging_vb->Size());
 			cb->BufferBarrier(
 				g_quad_gpu_vb, RHIAccessFlagBits::kTransferWrite, RHIPipelineStageFlags::kTransfer,
 				RHIAccessFlagBits::kVertexAttributeRead, RHIPipelineStageFlags::kVertexInput);
 			cb->SetEvent(g_quad_vb_copy_event, RHIPipelineStageFlags::kVertexInput);
-			once = !once;
 		}
 
 		if (!g_img_copy_event->IsSet(dev)) {
-			static bool once = true;
-			assert(once);
 			cb->Barrier_UndefinedToTransfer(g_test_image);
 			cb->CopyBufferToImage2D(g_test_image, g_img_staging_buf);
 			cb->Barrier_TransferToShaderRead(g_test_image);
 			cb->SetEvent(g_img_copy_event, RHIPipelineStageFlags::kFragmentShader);
-			once = !once;
 		}
 
 		static bool b_cube_copied = false;
@@ -1150,11 +1227,11 @@ void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane Screen
 			b_cube_copied = true;
 		}
 
-		update_uniform_staging_buf(g_curCBIdx, dev);
+		update_uniform_staging_buf(g_curFBIdx, dev);
 
-		// update uniforms device buffer (using g_curCBIdx for indexing, assume they are
+		// update uniforms device buffer (using g_curFBIdx for indexing, assume they are
 		// synchronized and there are same numbers of both)
-		cb->CopyBuffer(g_uniform_buffer, 0, g_uniform_staging_buffer[g_curCBIdx], 0, sizeof(PerFrameUniforms));
+		cb->CopyBuffer(g_uniform_buffer, 0, g_uniform_staging_buffer[g_curFBIdx], 0, sizeof(PerFrameUniforms));
 		cb->BufferBarrier(g_uniform_buffer, (uint32_t)RHIAccessFlagBits::kTransferWrite,
 						  RHIPipelineStageFlags::kTransfer, (uint32_t)RHIAccessFlagBits::kUniformRead,
 						  RHIPipelineStageFlags::kVertexShader);
@@ -1171,10 +1248,16 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 	IRHIDevice* dev = g_vulkan_device;
 	assert(1 == sanity_lock_cnt);
 
-	IRHIFrameBuffer* cur_fb = g_main_fb[g_curFBIdx];
-	IRHICmdBuf* cb = g_cmdbuf[g_curCBIdx];
-	IRHIImage* fb_image = dev->GetCurrentSwapChainImage();
-	IRHIImageView* cur_ds = g_main_ds[g_curFBIdx];
+	const uint32_t cur_swap_chain_img_idx = dev->GetCurrentSwapChainImageIndex();
+	assert(cur_swap_chain_img_idx <= g_main_fb.size());
+	IRHIFrameBuffer *cur_fb = g_main_fb[cur_swap_chain_img_idx];
+	IRHIImageView* cur_ds = g_main_ds[cur_swap_chain_img_idx];
+
+	IRHICmdBuf* cb = g_cmdbuf[g_curFBIdx];
+
+	// fb_image should be same as corresponding colour attachment of framebuffer
+	// GetSwapChainWidthHeight() ?
+	const IRHIImage* fb_image = dev->GetCurrentSwapChainImage();
 
 	for (int i = 0; i < g_tex_upload_tasks.size(); ++i) {
 		TextureUploadTask* t = g_tex_upload_tasks[i];
@@ -1203,7 +1286,7 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 	if (!g_draw_calls.empty()) {
 		g_ue_vb[g_curFBIdx]->CopyToGPU(dev, cb);
 		g_ue_ib[g_curFBIdx]->CopyToGPU(dev, cb);
-		ue_update_per_frame_uniforms(g_curCBIdx, dev);
+		ue_update_per_frame_uniforms(g_curFBIdx, dev);
 	}
 
 	//cb->Barrier_PresentToClear(fb_image);
@@ -1214,7 +1297,15 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 
 	ivec4 render_area(0, 0, fb_image->Width(), fb_image->Height());
 	RHIClearValue clear_values[] = { {vec4(0, 255, 0, 0), 0.0f, 0}, {vec4(0, 0, 0, 0), 1.0f, 0} };
+	// it is important we pass fb corresponding to current swapchain index as we will be waiting on it in Present()
 	cb->BeginRenderPass(g_main_pass, cur_fb, &render_area, clear_values, (uint32_t)countof(clear_values));
+
+	RHIViewport viewport;
+	viewport.x = viewport.y = 0;
+	viewport.width = (float)fb_image->Width();
+	viewport.height = (float)fb_image->Height();
+	viewport.minDepth = 0.0f;
+	viewport.maxDepth = 1.0f;
 
 	const IRHIDescriptorSet* sets[] = { g_my_ds_set0, g_my_ds_set1 };
 	if (0)
@@ -1222,7 +1313,7 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 		cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_tri_pipeline->Layout(), sets,
 			countof(sets));
 		cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_tri_pipeline);
-		cb->SetViewport(&g_current_viewport, 1);
+		cb->SetViewport(&viewport, 1);
 		cb->Draw(3, 1, 0, 0);
 	}
 
@@ -1236,7 +1327,7 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 		cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_quad_pipeline->Layout(), sets,
 							   countof(sets));
 		cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_quad_pipeline);
-		cb->SetViewport(&g_current_viewport, 1);
+		cb->SetViewport(&viewport, 1);
 		cb->BindVertexBuffers(&g_quad_gpu_vb, 0, 1);
 		cb->Draw(4, 1, 0, 0);
 	}
@@ -1245,7 +1336,7 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 		cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_world_model_pipeline->Layout(),
 							   sets, countof(sets));
 		cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_world_model_pipeline);
-		cb->SetViewport(&g_current_viewport, 1);
+		cb->SetViewport(&viewport, 1);
 		// cb->BindIndexBuffer(g_cube_ib->device_buf_, 0, RHIIndexType::kUint32);
 		cb->BindVertexBuffers(&g_cube_vb->device_buf_, 0, 1);
 		// cb->DrawIndexed(g_cube_ib->device_buf_->Size()/sizeof(uint32_t), 1, 0, 0, 0);
@@ -1253,22 +1344,30 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 	}
 
 	if (!g_draw_calls.empty()) {
-		cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_ue_pipeline);
-		cb->SetViewport(&g_current_viewport, 1);
 		cb->BindIndexBuffer(g_ue_ib[g_curFBIdx]->device_buf_, 0, RHIIndexType::kUint32);
 		cb->BindVertexBuffers(&g_ue_vb[g_curFBIdx]->device_buf_, 0, 1);
 
 		const int num_draw_calls = (int)g_draw_calls.size();
 		for (int i = 0; i < num_draw_calls; i++) {
+			const ComplexSurfaceDrawCall& dc = g_draw_calls[i];
+
+			uint32_t pipe_key = dc.pipeline_blend;
+			pipe_key = pipe_key | (((uint32_t)dc.b_depth_write) << 8);
+			assert(g_ue_pipelines.count(pipe_key));
+			IRHIGraphicsPipeline* pipeline = g_ue_pipelines[pipe_key];
+			cb->BindPipeline(RHIPipelineBindPoint::kGraphics, pipeline);
+			cb->SetViewport(&viewport, 1);
+
 			RHIDescriptorWriteDesc desc_write_desc[4];
 			RHIDescriptorWriteDescBuilder builder(desc_write_desc, countof(desc_write_desc));
-			builder.add(g_draw_calls[i].dset, 0, g_test_sampler, RHIImageLayout::kShaderReadOnlyOptimal, g_draw_calls[i].view)
+			builder.add(g_draw_calls[i].dset, 0, g_test_sampler, RHIImageLayout::kShaderReadOnlyOptimal, dc.view)
 				.add(g_draw_calls[i].dset, 1, g_ue_per_frame_uniforms[g_curFBIdx], 0, sizeof(UEPerFrameUniformBuf));
 			dev->UpdateDescriptorSet(desc_write_desc, builder.cur_index);
 
-			const IRHIDescriptorSet* sets[] = { g_draw_calls[i].dset };
-			cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_ue_pipeline->Layout(), sets, countof(sets));
-			cb->DrawIndexed(g_draw_calls[i].num_indices, 1, g_draw_calls[i].ib_offset, 0, 0);
+			const IRHIDescriptorSet* sets[] = { dc.dset };
+			cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, pipeline->Layout(), sets, countof(sets));
+
+			cb->DrawIndexed(dc.num_indices, 1, dc.ib_offset, 0, 0);
 		}
 	}
 
@@ -1290,9 +1389,6 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 	g_ue_ib_size[g_curFBIdx] = 0;
 	g_ue_dsets_reserved[g_curFBIdx] = 0;
 	g_draw_calls.resize(0);
-
-	g_curCBIdx = (g_curCBIdx  + 1) % ((int)dev->GetNumBufferedFrames());
-	g_curFBIdx = (g_curFBIdx  + 1) % ((int)g_main_fb.size());
 
 	sanity_lock_cnt--;
 }
@@ -1317,6 +1413,8 @@ Complex surfaces are used for map geometry. They consist of facets which in turn
 */
 void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Surface, FSurfaceFacet& Facet)
 {
+	assert(1 == sanity_lock_cnt);
+
 	const IRHIImageView* rhi_texture = nullptr;
 	if (!g_texCache->isCached(Surface.Texture->CacheID)) {
 		TextureUploadTask* t;
@@ -1415,7 +1513,15 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 			v->Pos = *(vec3*)&Poly->Pts[i]->Point.X; //Position
 		}
 
+
+		if(!(Flags & (PF_Translucent|PF_Modulated))) //If none of these flags, occlude (opengl renderer)
+		{
+			Flags |= PF_Occlude;
+		}
+
 		ComplexSurfaceDrawCall dc;
+		dc.pipeline_blend = select_blend(Flags);
+		dc.b_depth_write = select_depth_write(Flags);
 		dc.vb_offset = vb_offset;
 		dc.num_vertices = cur_vb_idx - vb_offset;
 		dc.ib_offset = ib_offset;
@@ -1575,5 +1681,4 @@ void UVulkanRenderDevice::OnSwapChainRecreated(void* user_ptr) {
 		fb_desc.layers_ = 1;
 		g_main_fb[i] = dev->CreateFrameBuffer(&fb_desc, g_main_pass);
 	}
-
 }

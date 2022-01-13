@@ -163,8 +163,8 @@ debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
 	const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* /*pUserData*/) {
 
 	if (messageSeverity > VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
-		log_error("validation layer: %s\n", pCallbackData->pMessage);
-		return VK_FALSE;
+		log_warning("validation layer: %s\n", pCallbackData->pMessage);
+		return VK_TRUE;
 	}
 	else if (messageSeverity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
 		log_warning("validation layer: %s\n", pCallbackData->pMessage);
@@ -624,6 +624,8 @@ VkAllocationCallbacks* create_allocator() {
 void destroy_allocator() { }
 
 bool vulkan_initialize(HWND rw_handle) {
+
+	assert(!vk_dev.is_initialized_);
 
 	vk_dev.pallocator_ = create_allocator();
 

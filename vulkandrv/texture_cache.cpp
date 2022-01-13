@@ -294,6 +294,12 @@ void TextureCache::destroy(TextureCache *tc) {
 // Invariant: should be always sorted
 static std::vector<TextureUploadTask*> g_taskCache;
 
+void texture_upload_task_init() {
+}
+void texture_upload_task_fini() {
+	g_taskCache.clear();
+}
+
 TextureUploadTask *TextureUploadTask::make(class IRHIImage *image, class IRHIImageView *img_view,
 										   bool is_update, int size, const DWORD*data,
 										   IRHIDevice *dev) {
@@ -325,6 +331,7 @@ TextureUploadTask *TextureUploadTask::make(class IRHIImage *image, class IRHIIma
 	task->state = kPending;
 
 	//TODO: convert right into this staging buf
+	assert(task->img_staging_buf->Size() >= size);
 	memcpy((uint8_t*)task->img_staging_buf->MappedPtr(), data, size);
 	// never unmap
 	//img_staging_buf->Unmap(dev);

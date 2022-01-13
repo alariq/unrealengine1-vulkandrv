@@ -42,3 +42,8 @@ class TextureCache {
 	bool update(const struct FTextureInfo *tex_info, unsigned long PolyFlags, class IRHIDevice *dev,
 				struct TextureUploadTask **task);
 };
+
+
+void texture_upload_task_init();
+void texture_upload_task_fini();
+

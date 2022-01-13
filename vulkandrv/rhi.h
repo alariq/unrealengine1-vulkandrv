@@ -950,7 +950,9 @@ public:
 	virtual uint32_t				GetSwapChainSize() = 0;
 	virtual IRHIImageView*	        GetSwapChainImageView(uint32_t index) = 0;
 	virtual class IRHIImage*	    GetSwapChainImage(uint32_t index) = 0;
+    // TODO: deprecate in favor of GetCurrentSwapChainImageIndex and use framebuffer indexed by it
 	virtual IRHIImage*				GetCurrentSwapChainImage() = 0;
+    virtual uint32_t                GetCurrentSwapChainImageIndex() = 0;
 
     virtual uint32_t GetNumBufferedFrames() = 0;
 

@@ -1127,7 +1127,10 @@ RHIBufferVk* RHIBufferVk::Create(IRHIDevice* device, uint32_t size, uint32_t usa
 		}
 	}
 
-	if (!vk_mem) return nullptr;
+	if (!vk_mem) {
+		log_error("RHIBufferVk::Create: OOM");
+		return nullptr;
+	}
 
 	if (vkBindBufferMemory(dev->Handle(), vk_buffer, vk_mem, 0) != VK_SUCCESS) {
 		log_error("Could not bind memory for a vertex buffer!\n");
@@ -1916,6 +1919,7 @@ IRHIImage *RHIDeviceVk::CreateImage(const RHIImageDesc *desc, RHIImageLayout::Va
 	}
 
 	RHIImageVk* image = new RHIImageVk(vk_image, *desc, vk_mem_prop, ci.initialLayout);
+	assert(image->vk_layout_ == VK_IMAGE_LAYOUT_UNDEFINED);
 	return image;
 }
 
@@ -2051,7 +2055,7 @@ IRHIDescriptorSet* RHIDeviceVk::AllocateDescriptorSet(const IRHIDescriptorSetLay
 			}
 		}
 
-		uint32_t MaxSets = num2alloc + 1000; // future proof :-)
+		uint32_t MaxSets = num2alloc + 5000; // future proof :-)
 		VkDescriptorPoolCreateInfo ci = {};
 		ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 		ci.pNext = nullptr;
@@ -2272,6 +2276,10 @@ bool RHIDeviceVk::BeginFrame() {
 			if (!OnWindowSizeChanged(0,0, false)) {
 				return false;
 			}
+		// temporarily close our eyes on it
+		case VK_ERROR_VALIDATION_FAILED_EXT:
+			log_warning("vkQueuePresentKHR: VK_ERROR_VALIDATION_FAILED_EXT\n");
+			break;
 		default:
 			log_error("Problem occurred during swap chain image acquisition!\n");
 			return false;
@@ -2297,7 +2305,8 @@ bool RHIDeviceVk::Submit(IRHICmdBuf* cb_in, RHIQueueType::Value queue_type) {
 	};
 
 	VkQueue queue = RHIQueueType::kGraphics == queue_type ? dev_.graphics_queue_ : dev_.present_queue_;
-	if (vkQueueSubmit(queue, 1, &submit_info, dev_.frame_fence_[frame_res_idx]) != VK_SUCCESS) {
+	VkResult res = vkQueueSubmit(queue, 1, &submit_info, dev_.frame_fence_[frame_res_idx]);
+	if (res != VK_SUCCESS && res!=VK_ERROR_VALIDATION_FAILED_EXT) {
 		log_error("vkQueueSubmit: failed\n");
 		return false;
 	}
@@ -2335,6 +2344,10 @@ bool RHIDeviceVk::Present() {
 			return false;
 		}
 		break;
+	// temporarily close our eyes on it
+	case VK_ERROR_VALIDATION_FAILED_EXT:
+		log_warning("vkQueuePresentKHR: VK_ERROR_VALIDATION_FAILED_EXT\n");
+		return true;
 	default:
 		log_error("vkQueuePresentKHR: Problem occurred during image presentation!\n");
 		return false;
@@ -2383,6 +2396,9 @@ bool RHIDeviceVk::OnWindowSizeChanged(uint32_t width, uint32_t height, bool full
 	if (new_swapchain_data.capabilities_.currentExtent.height == 0 ||
 		new_swapchain_data.capabilities_.currentExtent.width == 0)
 	{
+		log_error("Bad stuff happened, probably you are debugging resolution change and stepping in a debugger");
+		return false;
+
 		if (width != 0 && height != 0) {
 			log_info("Could not get swapchain res, using provided res: %d %d\n", width, height);
 		} else {
@@ -2404,6 +2420,9 @@ bool RHIDeviceVk::OnWindowSizeChanged(uint32_t width, uint32_t height, bool full
 		dev_.queue_families_, dev_.pallocator_, new_swapchain, dev_.swap_chain_.swap_chain_)) {
 		return false;
 	}
+
+	// because cannot destroy stuff that is in use
+	vkDeviceWaitIdle(dev_.device_);
 
 	// destroy old swap chain
 	destroy_swapchain(dev_);
