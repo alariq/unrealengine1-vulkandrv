@@ -340,6 +340,8 @@ TextureUploadTask *TextureUploadTask::make(class IRHIImage *image, class IRHIIma
 }
 
 void TextureUploadTask::release() {
+	assert(g_taskCache.end() == std::find(g_taskCache.begin(), g_taskCache.end(), this));
+
 	img_view = nullptr;
 	image = nullptr;
 	state = kInvalid;

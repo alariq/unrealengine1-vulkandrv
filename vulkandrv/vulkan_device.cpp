@@ -2381,6 +2381,7 @@ IRHIImage* RHIDeviceVk::GetSwapChainImage(uint32_t index) {
 
 bool RHIDeviceVk::OnWindowSizeChanged(uint32_t width, uint32_t height, bool fullscreen) {
 
+	log_warning("OnWindowSizeChanged");
 	uint32_t old_w = dev_.swap_chain_data_.capabilities_.currentExtent.width;
 	uint32_t old_h = dev_.swap_chain_data_.capabilities_.currentExtent.height;
 

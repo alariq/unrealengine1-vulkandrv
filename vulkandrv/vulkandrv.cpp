@@ -1134,6 +1134,16 @@ void UVulkanRenderDevice::Flush(UBOOL AllowPrecache)
 	if(AllowPrecache && options.precache)
 		URenderDevice::PrecacheOnFlip = 1;
 	#endif
+
+	for (auto i = g_tex_upload_tasks.begin(); i < g_tex_upload_tasks.end(); ++i)
+	{
+		(*i)->release();
+	}
+
+	g_tex_upload_tasks.clear();
+	g_tex_upload_in_progress.clear();
+	TextureCache::destroy(g_texCache);
+	g_texCache = TextureCache::makeCache();
 }
 #endif
 
@@ -1268,20 +1278,24 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 		cb->CopyBufferToImage2D(t->image, t->img_staging_buf);
 		cb->Barrier_TransferToShaderRead(t->image);
 		cb->SetEvent(t->img_copy_event, RHIPipelineStageFlags::kFragmentShader);
+
+		assert(g_tex_upload_in_progress.end() ==
+			   std::find(g_tex_upload_in_progress.begin(), g_tex_upload_in_progress.end(), t));
 		g_tex_upload_in_progress.push_back(t);
 	}
 	g_tex_upload_tasks.clear();
 
-	// move finished tasks to the end
-	auto it = std::remove_if(g_tex_upload_in_progress.begin(), g_tex_upload_in_progress.end(),
-		[dev](const TextureUploadTask* t) { return t->img_copy_event->IsSet(dev); });
-	// release them
-	for (auto i = it; i < g_tex_upload_in_progress.end(); ++i)
-	{
-		(*i)->release();
+
+	const auto b = g_tex_upload_in_progress.begin();
+	const auto e = g_tex_upload_in_progress.end();
+	for (auto it = b; it != e; ++it) {
+		if ((*it)->img_copy_event->IsSet(dev)) {
+			(*it)->release();
+			*it = nullptr;
+		}
 	}
-	// and clear array
-	g_tex_upload_in_progress.erase(it, g_tex_upload_in_progress.end());
+	auto it = std::remove_if(b, e, [dev](const TextureUploadTask* t) { return t == nullptr; });
+	g_tex_upload_in_progress.erase(it, e);
 
 	if (!g_draw_calls.empty()) {
 		g_ue_vb[g_curFBIdx]->CopyToGPU(dev, cb);
