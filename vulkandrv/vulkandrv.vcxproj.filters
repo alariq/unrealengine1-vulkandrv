@@ -1910,5 +1910,14 @@
     <CustomBuild Include="shaders\complex-surface.vert">
       <Filter>shaders</Filter>
     </CustomBuild>
+    <CustomBuild Include="shaders\fs-quad.frag">
+      <Filter>shaders</Filter>
+    </CustomBuild>
+    <CustomBuild Include="shaders\fs-quad.vert">
+      <Filter>shaders</Filter>
+    </CustomBuild>
+    <CustomBuild Include="shaders\complex-surface-atest.frag">
+      <Filter>shaders</Filter>
+    </CustomBuild>
   </ItemGroup>
 </Project>

@@ -17,8 +17,13 @@ layout(set=0, binding=2) uniform PerDrawCallData_t {
 ////////////////////////////////////////////////////////////////////////////////
 layout(location = 0) out vec4 o_Color;
 
+#define ALPHA_TEST 1
 void main() {
-    vec4 albedo = texture(DiffuseTex, v_TexCoord);
+    vec4 albedo = texture(DiffuseTex, v_TexCoord).rgba;
     o_Color = albedo;
-
+#if defined(ALPHA_TEST)
+    if(albedo.a < 0.5) {
+        discard;
+    }
+#endif
 }

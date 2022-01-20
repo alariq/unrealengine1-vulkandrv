@@ -162,6 +162,11 @@ const IRHIImageView* TextureCache::get(CacheKey_t id) const {
 	return tc->thash[id].view;
 }
 
+bool TextureCache::isMasked(CacheKey_t id) const {
+	assert(isCached(id));
+	return tc->thash[id].metadata.masked;
+}
+
 bool TextureCache::cache(FTextureInfo *TexInfo, DWORD PolyFlags, IRHIDevice *dev, TextureUploadTask** task) {
 
 	// TODO: can't this just be an assert?

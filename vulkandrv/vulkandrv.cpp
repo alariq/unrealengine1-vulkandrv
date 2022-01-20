@@ -251,6 +251,7 @@ std::vector<IRHIFrameBuffer*> g_main_fb;
 std::vector<IRHIImageView*> g_main_ds;
 
 IRHIGraphicsPipeline *g_tri_pipeline = nullptr;
+IRHIGraphicsPipeline *g_fs_clear_pipeline = nullptr;
 IRHIGraphicsPipeline *g_quad_pipeline = nullptr;
 IRHIGraphicsPipeline *g_world_model_pipeline = nullptr;
 
@@ -294,6 +295,29 @@ enum PipelineBlend : uint8_t {
 	kPipeBlendInvisible,
 	kPipeBlendCount
 };
+const uint32_t BLEND_MODE_MASK = 0x7;
+const uint32_t DEPTH_MODE_MASK = 0x1;
+const uint32_t ALPHA_TEST_MASK = 0x1;
+const uint32_t DEPTH_CLEAR_MASK = 0x1;
+
+const uint32_t BLEND_MODE_OFFSET = 0;
+const uint32_t DEPTH_MODE_OFFSET = 3;
+const uint32_t ALPHA_TEST_OFFSET = 4;
+const uint32_t DEPTH_CLEAR_OFFSET = 5;
+
+uint32_t make_key(PipelineBlend blend, bool depth_write, bool alpha_test, bool depth_clear) {
+	uint32_t b = (uint32_t)blend;
+	uint32_t dw = !!depth_write;
+	uint32_t at = !!alpha_test;
+	uint32_t clear = !!depth_clear;
+
+	uint32_t rv = ((b & BLEND_MODE_MASK) << BLEND_MODE_OFFSET) |
+				  ((dw & DEPTH_MODE_MASK) << DEPTH_MODE_OFFSET) |
+				  ((at & ALPHA_TEST_MASK) << ALPHA_TEST_OFFSET) |
+				  ((clear & DEPTH_CLEAR_MASK) << DEPTH_CLEAR_OFFSET);
+
+	return rv;
+}
 
 struct ComplexSurfaceDrawCall {
 	uint32_t vb_offset;
@@ -304,6 +328,8 @@ struct ComplexSurfaceDrawCall {
 	const IRHIImageView* view;
 	PipelineBlend pipeline_blend;
 	bool b_depth_write;
+	bool b_depth_clear;
+	bool b_alpha_test;
 };
 
 const uint32_t gUENumVert = 1024 * 1024;
@@ -313,6 +339,7 @@ uint32_t g_ue_vb_size[kNumBufferedFrames] = { 0 };
 SBuffer* g_ue_ib[kNumBufferedFrames] = { 0 };
 uint32_t g_ue_ib_size[kNumBufferedFrames] = { 0 };
 SShader* g_ue_complex_shader = nullptr;
+SShader* g_ue_complex_shader_alpha_test = nullptr;
 IRHIGraphicsPipeline *g_ue_pipeline = nullptr;
 
 IRHIDescriptorSetLayout* g_ue_ds_layout = 0;
@@ -672,6 +699,9 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	g_ue_complex_shader = SShader::load(device, "vulkandrv/complex-surface.vert.spv.bin",
 										"vulkandrv/complex-surface.frag.spv.bin");
 
+	g_ue_complex_shader_alpha_test = SShader::load(device, "vulkandrv/complex-surface.vert.spv.bin",
+										"vulkandrv/complex-surface-atest.frag.spv.bin");
+
 	RHIAttachmentDesc att_desc[2]; // color + depth
 	att_desc[0].format = device->GetSwapChainFormat();
 	att_desc[0].numSamples = 1;
@@ -760,6 +790,9 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 								  "vulkandrv/spir-v.frag.spv.bin");
 	SShader* quad_shader = SShader::load(device, "vulkandrv/spir-v-model.vert.spv.bin",
 								  "vulkandrv/spir-v-model.frag.spv.bin");
+
+	SShader* fs_quad = SShader::load(device, "vulkandrv/fs-quad.vert.spv.bin",
+								  "vulkandrv/fs-quad.frag.spv.bin");
 
 	Image img;
 	const char *image_path = "./data/ut.bmp";
@@ -926,6 +959,14 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	RHIDepthStencilState ds_no_write_state = ds_state;
 	ds_no_write_state.depthWriteEnable = false;
 
+	RHIDepthStencilState ds_write_always = ds_state;
+	ds_write_always.depthCompareOp = RHICompareOp::kAlways;
+
+
+	RHIColorBlendAttachmentState no_blend_no_color = create_blend_att_state(false, RHIBlendFactor::One, RHIBlendFactor::Zero);
+	no_blend_no_color.colorWriteMask = 0;
+	const RHIColorBlendState no_blend_no_color_state = { false, RHILogicOp::kCopy, 1, &no_blend_no_color, {0, 0, 0, 0}};
+
 	RHIDynamicState::Value dyn_state[] = { RHIDynamicState::kViewport };
 
 	RHIDescriptorSetLayoutDesc dsl_desc[] = {
@@ -993,6 +1034,7 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 
 	const IRHIDescriptorSetLayout* pipe_layout_desc[] = { g_my_layout, g_my_layout };
 	IRHIPipelineLayout *pipeline_layout = device->CreatePipelineLayout(pipe_layout_desc, countof(pipe_layout_desc));
+	IRHIPipelineLayout *pipeline_layout_empty = device->CreatePipelineLayout(nullptr, 0);
 
 	const IRHIDescriptorSetLayout* ue_pipe_layout_desc[] = { g_ue_ds_layout };
 	IRHIPipelineLayout *ue_pipeline_layout = device->CreatePipelineLayout(ue_pipe_layout_desc, countof(ue_pipe_layout_desc));
@@ -1000,6 +1042,11 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	g_tri_pipeline = device->CreateGraphicsPipeline(
 		tri_shader->stages_, countof(tri_shader->stages_), &tri_vi_state, &tri_ia_state,
 		&viewport_state, &raster_state, &ms_state, &ds_state, &no_blend_state, pipeline_layout,
+		dyn_state, countof(dyn_state), g_main_pass);
+
+	g_fs_clear_pipeline = device->CreateGraphicsPipeline(
+		fs_quad->stages_, countof(fs_quad->stages_), &tri_vi_state, &tri_ia_state,
+		&viewport_state, &raster_state, &ms_state, &ds_write_always, &no_blend_no_color_state, pipeline_layout_empty,
 		dyn_state, countof(dyn_state), g_main_pass);
 
 	g_quad_pipeline = device->CreateGraphicsPipeline(
@@ -1019,7 +1066,6 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 
 
 	for (uint8_t j = 0; j < 2; j++) {
-		const uint32_t dw_key = j;
 		const RHIDepthStencilState* depth_state = j ? &ds_write_state : &ds_no_write_state;
 		for (uint8_t i = 0; i < kPipeBlendCount; i++) {
 			IRHIGraphicsPipeline* pipeline = device->CreateGraphicsPipeline(
@@ -1027,10 +1073,34 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 				&ue_ia_state, &viewport_state, &ue_raster_state, &ms_state, depth_state, g_blend_states[i],
 				ue_pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
 
-			uint32_t key = i | (j << 8);
+			uint32_t key = make_key((PipelineBlend)i, j!=0, false, false);
+			assert(g_ue_pipelines.count(key) == 0);
 			g_ue_pipelines.insert(std::make_pair(key, pipeline));
 		}
 	}
+	// clear Z
+	{
+		// yeah, we actually do depth write, but we need to have a separate flag for depth clear
+		// (which is a different pipeline meaning we overwrite everyting)
+		uint32_t clear_z_key = make_key(kPipeBlendNo, !"DEPTH_WRITE", !"ALPHA_TEST", "DEPTH_CLEAR");
+		assert(g_ue_pipelines.count(clear_z_key) == 0);
+		g_ue_pipelines.insert(std::make_pair(clear_z_key, g_fs_clear_pipeline));
+	}
+
+	// alpha test
+	{
+		uint32_t alpha_test_key =
+			make_key(kPipeBlendNo, "DEPTH_WRITE", "ALPHA_TEST", !"DEPTH_CLEAR");
+		assert(g_ue_pipelines.count(alpha_test_key) == 0);
+		IRHIGraphicsPipeline *pipeline = device->CreateGraphicsPipeline(
+			g_ue_complex_shader_alpha_test->stages_,
+			countof(g_ue_complex_shader_alpha_test->stages_), &ue_vi_state, &ue_ia_state,
+			&viewport_state, &ue_raster_state, &ms_state, &ds_write_state,
+			g_blend_states[kPipeBlendNo], ue_pipeline_layout, dyn_state, countof(dyn_state),
+			g_main_pass);
+		g_ue_pipelines.insert(std::make_pair(alpha_test_key, pipeline));
+	}
+	
 
 	if (!UVulkanRenderDevice::SetRes(NewX, NewY, NewColorBytes, Fullscreen)) {
 		GError->Log(L"Init: SetRes failed.");
@@ -1365,13 +1435,14 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 		for (int i = 0; i < num_draw_calls; i++) {
 			const ComplexSurfaceDrawCall& dc = g_draw_calls[i];
 
-			uint32_t pipe_key = dc.pipeline_blend;
-			pipe_key = pipe_key | (((uint32_t)dc.b_depth_write) << 8);
-			assert(g_ue_pipelines.count(pipe_key));
-			IRHIGraphicsPipeline* pipeline = g_ue_pipelines[pipe_key];
+			//TODO: make this key where we fill drawcall struct?
+			uint32_t key = make_key(dc.pipeline_blend, dc.b_depth_write, dc.b_alpha_test, dc.b_depth_clear);
+			assert(g_ue_pipelines.count(key));
+			IRHIGraphicsPipeline* pipeline = g_ue_pipelines[key];
 			cb->BindPipeline(RHIPipelineBindPoint::kGraphics, pipeline);
 			cb->SetViewport(&viewport, 1);
 
+			if (dc.dset) {
 			RHIDescriptorWriteDesc desc_write_desc[4];
 			RHIDescriptorWriteDescBuilder builder(desc_write_desc, countof(desc_write_desc));
 			builder.add(g_draw_calls[i].dset, 0, g_test_sampler, RHIImageLayout::kShaderReadOnlyOptimal, dc.view)
@@ -1380,8 +1451,13 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 
 			const IRHIDescriptorSet* sets[] = { dc.dset };
 			cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, pipeline->Layout(), sets, countof(sets));
+			}
 
+			if (dc.num_indices) {
 			cb->DrawIndexed(dc.num_indices, 1, dc.ib_offset, 0, 0);
+			} else {
+				cb->Draw(dc.num_vertices, 1, dc.ib_offset, 0);
+			}
 		}
 	}
 
@@ -1441,6 +1517,13 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 			g_texCache->update(Surface.Texture, Surface.PolyFlags, g_vulkan_device, &t);
 		g_tex_upload_tasks.push_back(t);
 		}
+		//Mask bit changed. Static texture, so must be deleted and recreated.
+		else if ((Surface.PolyFlags & PF_Masked) != 0 && !g_texCache->isMasked(Surface.Texture->CacheID))
+		{
+			assert(!"Handle this");
+			//delete & recache
+		}
+			
 		rhi_texture = g_texCache->get(Surface.Texture->CacheID);
 	}
 	
@@ -1536,6 +1619,13 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 		ComplexSurfaceDrawCall dc;
 		dc.pipeline_blend = select_blend(Flags);
 		dc.b_depth_write = select_depth_write(Flags);
+		dc.b_depth_clear = 0;
+		dc.b_alpha_test = Flags & PF_Masked;
+
+		// either alpha test or blend
+		assert((!dc.b_alpha_test && kPipeBlendNo == dc.pipeline_blend) ||
+			   (dc.b_alpha_test ^ (!!dc.pipeline_blend)));
+
 		dc.vb_offset = vb_offset;
 		dc.num_vertices = cur_vb_idx - vb_offset;
 		dc.ib_offset = ib_offset;
@@ -1548,6 +1638,8 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 		dc.dset = g_ue_dsets[g_curFBIdx][g_ue_dsets_reserved[g_curFBIdx]];
 		g_ue_dsets_reserved[g_curFBIdx]++;
 		g_draw_calls.emplace_back(dc);
+
+	//	log_info("i: %d flags: %x depth write: %d\n", idx, Flags, dc.b_depth_write);
 	}
 
 
@@ -1567,6 +1659,21 @@ void UVulkanRenderDevice::Draw2DPoint(FSceneNode* Frame, FPlane Color, DWORD Lin
 }
 void UVulkanRenderDevice::ClearZ(FSceneNode* Frame)
 {
+	ComplexSurfaceDrawCall dc;
+	dc.pipeline_blend = kPipeBlendNo;
+	dc.b_depth_write = 0;
+	dc.b_depth_clear = true;
+	dc.b_alpha_test = false;
+
+	dc.vb_offset = 0;
+	dc.num_vertices = 6;
+	dc.ib_offset = 0;
+	dc.num_indices = 0;
+	dc.view = nullptr;
+	dc.dset = nullptr;
+	g_draw_calls.emplace_back(dc);
+
+	//log_info("ClearZ");
 }
 void UVulkanRenderDevice::PushHit(const BYTE* Data, INT Count)
 {

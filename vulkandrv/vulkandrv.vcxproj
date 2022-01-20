@@ -952,13 +952,13 @@
   <ItemGroup>
     <CustomBuild Include="shaders\spir-v-model.frag">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(SolutionDir)make-spir-v.bat %(FullPath) $(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension)</Command>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension).spv.bin</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(SolutionDir)make-spir-v.bat %(FullPath) $(SolutionDir)packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension)</Command>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(SolutionDir)packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension).spv.bin</Outputs>
     </CustomBuild>
     <CustomBuild Include="shaders\spir-v-model.vert">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(SolutionDir)make-spir-v.bat %(FullPath) $(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension)</Command>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension).spv.bin</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(SolutionDir)make-spir-v.bat %(FullPath) $(SolutionDir)packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension)</Command>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(SolutionDir)packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension).spv.bin</Outputs>
     </CustomBuild>
     <CustomBuild Include="shaders\spir-v.frag">
       <FileType>Document</FileType>
@@ -984,11 +984,28 @@
       <FileType>Document</FileType>
       <Command Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(SolutionDir)make-spir-v.bat %(FullPath) $(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension)</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension).spv.bin</Outputs>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">false</ExcludedFromBuild>
     </CustomBuild>
     <CustomBuild Include="shaders\complex-surface.vert">
       <FileType>Document</FileType>
       <Command Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(SolutionDir)make-spir-v.bat %(FullPath) $(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension)</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension).spv.bin</Outputs>
+    </CustomBuild>
+    <CustomBuild Include="shaders\fs-quad.frag">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(SolutionDir)make-spir-v.bat %(FullPath) $(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension)</Command>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension).spv.bin</Outputs>
+    </CustomBuild>
+    <CustomBuild Include="shaders\fs-quad.vert">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(SolutionDir)make-spir-v.bat %(FullPath) $(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension)</Command>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension).spv.bin</Outputs>
+    </CustomBuild>
+    <CustomBuild Include="shaders\complex-surface-atest.frag">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(SolutionDir)make-spir-v.bat %(FullPath) $(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension)</Command>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension).spv.bin</Outputs>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">false</ExcludedFromBuild>
     </CustomBuild>
     <None Include="VulkanDrv.int" />
   </ItemGroup>

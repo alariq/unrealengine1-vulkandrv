@@ -35,6 +35,7 @@ class TextureCache {
   public:
 	bool isCached(CacheKey_t id) const;
 	const class IRHIImageView *get(CacheKey_t id) const;
+	bool isMasked(CacheKey_t id) const;
 	static TextureCache *makeCache();
 	static void destroy(TextureCache *);
 	bool cache(/*const*/ struct FTextureInfo *tex_info, unsigned long PolyFlags,
