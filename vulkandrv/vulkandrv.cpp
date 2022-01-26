@@ -55,6 +55,27 @@ static LARGE_INTEGER perfCounterFreq;
 //static Shader_ComplexSurface *shader_ComplexSurface;
 //static Shader_FogSurface *shader_FogSurface;
 
+
+template <typename T> // all memebers should be templated?
+struct BufferView {
+	typedef typename T El_t;
+	uint8_t *data_;
+	uint32_t el_size_; // aka "element stride"
+	int size_;
+
+	const El_t &operator[](int i) const {
+		check(i >= 0 && i < size_);
+		return *(El_t *)(data_ + el_size_ * i);
+	}
+	El_t &operator[](int i) {
+		check(i >= 0 && i < size_);
+		return *(El_t *)(data_ + el_size_ * i);
+	}
+
+	BufferView(void *data, uint32_t el_size, int el_count)
+		: data_((uint8_t*)data), el_size_(el_size), size_(el_count) {}
+};
+
 static class TextureCache* g_texCache;
 
 struct SimpleVertex {
@@ -80,6 +101,12 @@ struct PerFrameUniforms {
 
 struct UEPerDrawCallUniformBuf {
 	mat4 world;
+};
+
+struct UEPerDrawCallVsData {
+	vec4 XAxis_UDot;
+	vec4 YAxis_VDot;
+	vec4 Diffuse_PanXY_UVMult;
 };
 
 struct UEPerFrameUniformBuf {
@@ -157,6 +184,12 @@ struct SBuffer {
 		return b;
 	}
 
+	static SBuffer* makeUB(IRHIDevice* dev, uint32_t size, const void* data) {
+		SBuffer* b = make(dev, size, RHIBufferUsageFlagBits::kUniformBufferBit, data);
+		b->type_ = kUni;
+		return b;
+	}
+
 	static SBuffer* make(IRHIDevice* dev, uint32_t size, uint32_t usage, const void* data) {
 		SBuffer* buf = new SBuffer();
 		buf->size_ = size;
@@ -201,6 +234,11 @@ struct SBuffer {
 			case kVB: 
 				dst_acc_flags = RHIAccessFlagBits::kVertexAttributeRead;
 				dst_pipe_stage = RHIPipelineStageFlags::kVertexInput;
+				break;
+			case kUni: 
+				dst_acc_flags = RHIAccessFlagBits::kShaderRead;
+				// TODO: may pass exact flags in case of Uniform Buffer for now select earliest one
+				dst_pipe_stage = RHIPipelineStageFlags::kVertexShader;
 				break;
 			default:
 				assert(!"Wrong buffer type, TODO: add case for uniform buffer");
@@ -324,6 +362,8 @@ struct ComplexSurfaceDrawCall {
 	uint32_t num_vertices;
 	uint32_t ib_offset;
 	uint32_t num_indices;
+	//TODO: just for check
+	uint32_t vs_ub_idx;
 	IRHIDescriptorSet* dset;
 	const IRHIImageView* view;
 	PipelineBlend pipeline_blend;
@@ -332,12 +372,27 @@ struct ComplexSurfaceDrawCall {
 	bool b_alpha_test;
 };
 
-const uint32_t gUENumVert = 1024 * 1024;
-const uint32_t gUENumIndices = 1024 * 1024;
+const uint32_t gUENumVert = 256 * 1024;
+const uint32_t gUENumIndices = 256 * 1024;
+// expect no more than 1k draw calls per frame
+// TODO: we will come up with reallocation of course,.. later
+const uint32_t gUEDrawCalls = 1000;
+// IB
 SBuffer* g_ue_vb[kNumBufferedFrames] = { 0 };
 uint32_t g_ue_vb_size[kNumBufferedFrames] = { 0 };
+// VB
 SBuffer* g_ue_ib[kNumBufferedFrames] = { 0 };
 uint32_t g_ue_ib_size[kNumBufferedFrames] = { 0 };
+// dynamic UB for VS per draw call data
+SBuffer* g_ue_vs_ub[kNumBufferedFrames] = { 0 };
+uint32_t g_ue_vs_ub_el_size = 0;
+const uint32_t g_ue_vs_ub_num_el = gUEDrawCalls;
+uint32_t g_ue_vs_ub_size[kNumBufferedFrames] = { 0 };
+// descriptor set (one per frame) designed to store per frame data (proj. matrix and stuff)
+// for now only stores VS data using dynamic UB (so no need to have ds per draw call)
+IRHIDescriptorSetLayout* g_ue_vs_ub_ds_layout = 0;
+IRHIDescriptorSet* g_ue_vs_ub_ds[kNumBufferedFrames] = {0};
+
 SShader* g_ue_complex_shader = nullptr;
 SShader* g_ue_complex_shader_alpha_test = nullptr;
 IRHIGraphicsPipeline *g_ue_pipeline = nullptr;
@@ -349,7 +404,6 @@ int g_ue_dsets_reserved[kNumBufferedFrames] = { 0 };
 std::vector<ComplexSurfaceDrawCall> g_draw_calls;
 
 // UEPerDrawCallUniformBuf 
-const uint32_t gUEDrawCalls = 1000;
 IRHIBuffer* g_ue_per_draw_call_uniforms[kNumBufferedFrames] = { 0 };
 uint32_t g_ue_per_draw_call_uniforms_count[kNumBufferedFrames] = { 0 };
 // UEPerFrameUniformBuf 
@@ -676,12 +730,27 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 
 	g_quad_vb_copy_event = device->CreateEvent();
 
+	RHIDescriptorSetLayoutDesc ue_dsl_desc[] = {
+		{RHIDescriptorType::kCombinedImageSampler, RHIShaderStageFlagBits::kFragment, 1, 0},
+		// per frame
+		{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment | RHIShaderStageFlagBits::kVertex, 1, 1},
+		// per draw call
+		{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment | RHIShaderStageFlagBits::kVertex, 1, 2},
+	};
+
+	RHIDescriptorSetLayoutDesc ue_vs_dsl_desc[] = {
+		{RHIDescriptorType::kUniformBufferDynamic, RHIShaderStageFlagBits::kVertex, 1, 0}
+	};
+	g_ue_ds_layout = device->CreateDescriptorSetLayout(ue_dsl_desc, countof(ue_dsl_desc));
+	g_ue_vs_ub_ds_layout = device->CreateDescriptorSetLayout(ue_vs_dsl_desc, countof(ue_vs_dsl_desc));
+
 	// create ue geometry buffers (one per swap chain len)
 	for (int i = 0; i < kNumBufferedFrames; ++i) {
 		g_ue_vb[i] = SBuffer::makeVB(device, gUENumVert* sizeof(UEVertexComplex), nullptr);
 		g_ue_vb_size[i] = 0;
-		g_ue_ib[i] = SBuffer::makeIB(device, gUENumIndices* sizeof(UEVertexComplex), nullptr);
+		g_ue_ib[i] = SBuffer::makeIB(device, gUENumIndices* sizeof(uint32_t), nullptr);
 		g_ue_ib_size[i] = 0;
+
 
 		// TODO: check flags
 		g_ue_per_draw_call_uniforms[i] = device->CreateBuffer(
@@ -695,6 +764,36 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 			RHIMemoryPropertyFlagBits::kHostVisible, RHISharingMode::kExclusive);
 		g_ue_per_frame_uniforms_ptr[i] =
 			(UEPerFrameUniformBuf*)g_ue_per_frame_uniforms[i]->Map(device, 0, 0xFFFFFFFF, 0);
+
+		// dynamic buffer & its ds
+		{
+			// offsetAlignment is also our element size (obviously)
+			// there are restrictions on alignment of dynamic UB offsets
+			uint32_t minUboAlignment = device->GetProperties().minUniformBufferOffsetAlignment;
+			uint32_t offsetAlignment = sizeof(UEPerDrawCallVsData);
+			if (minUboAlignment > 0) {
+				// this alignment can only be >= sizeof(UEPerDrawCallVsData) as it is also an offset : -)
+				offsetAlignment = (offsetAlignment + minUboAlignment - 1) & ~(minUboAlignment - 1);
+			}
+			g_ue_vs_ub_el_size = offsetAlignment;
+			// I just hope that UB alignment will be max possible alignment for any possible usage
+			// (like our dynamic descriptor)
+			g_ue_vs_ub[i] = SBuffer::makeUB(device, g_ue_vs_ub_num_el * g_ue_vs_ub_el_size, nullptr);
+			g_ue_vs_ub_size[i] = 0;
+			g_ue_vs_ub_ds[i] = device->AllocateDescriptorSet(g_ue_vs_ub_ds_layout);
+
+			RHIDescriptorWriteDesc vs_ds_write_desc;
+			RHIDescriptorWriteDescBuilder builder(&vs_ds_write_desc, 1);
+			// VkDescriptorBufferInfo man page
+			// For VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC and
+			// VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC descriptor types, offset is the base offset
+			// from which the dynamic offset is applied and range is the static size used for all
+			// dynamic offsets.
+			builder.add(g_ue_vs_ub_ds[i], 0, g_ue_vs_ub[i]->device_buf_, 0,
+						offsetAlignment);
+			device->UpdateDescriptorSet(&vs_ds_write_desc, builder.cur_index);
+		}
+
 	}
 	g_ue_complex_shader = SShader::load(device, "vulkandrv/complex-surface.vert.spv.bin",
 										"vulkandrv/complex-surface.frag.spv.bin");
@@ -975,14 +1074,6 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 		{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment | RHIShaderStageFlagBits::kVertex, 1, 2}
 	};
 
-	RHIDescriptorSetLayoutDesc ue_dsl_desc[] = {
-		{RHIDescriptorType::kCombinedImageSampler, RHIShaderStageFlagBits::kFragment, 1, 0},
-		// per frame
-		{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment | RHIShaderStageFlagBits::kVertex, 1, 1},
-		// per draw call
-		{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment | RHIShaderStageFlagBits::kVertex, 1, 2}
-	};
-
 
 	RHISamplerDesc sampler_desc;
 	sampler_desc.magFilter = RHIFilter::kLinear;
@@ -1018,7 +1109,6 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 
 
 	g_my_layout = device->CreateDescriptorSetLayout(dsl_desc, countof(dsl_desc));
-	g_ue_ds_layout = device->CreateDescriptorSetLayout(ue_dsl_desc, countof(ue_dsl_desc));
 	g_my_ds_set0 = device->AllocateDescriptorSet(g_my_layout);
 	g_my_ds_set1 = device->AllocateDescriptorSet(g_my_layout);
 
@@ -1032,11 +1122,12 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	device->UpdateDescriptorSet(desc_write_desc, builder.cur_index);
 
 
+
 	const IRHIDescriptorSetLayout* pipe_layout_desc[] = { g_my_layout, g_my_layout };
 	IRHIPipelineLayout *pipeline_layout = device->CreatePipelineLayout(pipe_layout_desc, countof(pipe_layout_desc));
 	IRHIPipelineLayout *pipeline_layout_empty = device->CreatePipelineLayout(nullptr, 0);
 
-	const IRHIDescriptorSetLayout* ue_pipe_layout_desc[] = { g_ue_ds_layout };
+	const IRHIDescriptorSetLayout* ue_pipe_layout_desc[] = { g_ue_ds_layout, g_ue_vs_ub_ds_layout };
 	IRHIPipelineLayout *ue_pipeline_layout = device->CreatePipelineLayout(ue_pipe_layout_desc, countof(ue_pipe_layout_desc));
 
 	g_tri_pipeline = device->CreateGraphicsPipeline(
@@ -1368,8 +1459,10 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 	g_tex_upload_in_progress.erase(it, e);
 
 	if (!g_draw_calls.empty()) {
+		// TODO: do not copy whole array! only actual filled frame data 
 		g_ue_vb[g_curFBIdx]->CopyToGPU(dev, cb);
 		g_ue_ib[g_curFBIdx]->CopyToGPU(dev, cb);
+		g_ue_vs_ub[g_curFBIdx]->CopyToGPU(dev, cb);
 		ue_update_per_frame_uniforms(g_curFBIdx, dev);
 	}
 
@@ -1395,7 +1488,7 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 	if (0)
 	{
 		cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_tri_pipeline->Layout(), sets,
-			countof(sets));
+			countof(sets), 0, nullptr);
 		cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_tri_pipeline);
 		cb->SetViewport(&viewport, 1);
 		cb->Draw(3, 1, 0, 0);
@@ -1409,7 +1502,7 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 	if(0)
 	{
 		cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_quad_pipeline->Layout(), sets,
-							   countof(sets));
+							   countof(sets), 0, nullptr);
 		cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_quad_pipeline);
 		cb->SetViewport(&viewport, 1);
 		cb->BindVertexBuffers(&g_quad_gpu_vb, 0, 1);
@@ -1418,7 +1511,7 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 	if(0)
 	{
 		cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, g_world_model_pipeline->Layout(),
-							   sets, countof(sets));
+							   sets, countof(sets), 0, nullptr);
 		cb->BindPipeline(RHIPipelineBindPoint::kGraphics, g_world_model_pipeline);
 		cb->SetViewport(&viewport, 1);
 		// cb->BindIndexBuffer(g_cube_ib->device_buf_, 0, RHIIndexType::kUint32);
@@ -1443,18 +1536,24 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 			cb->SetViewport(&viewport, 1);
 
 			if (dc.dset) {
-			RHIDescriptorWriteDesc desc_write_desc[4];
-			RHIDescriptorWriteDescBuilder builder(desc_write_desc, countof(desc_write_desc));
-			builder.add(g_draw_calls[i].dset, 0, g_test_sampler, RHIImageLayout::kShaderReadOnlyOptimal, dc.view)
-				.add(g_draw_calls[i].dset, 1, g_ue_per_frame_uniforms[g_curFBIdx], 0, sizeof(UEPerFrameUniformBuf));
-			dev->UpdateDescriptorSet(desc_write_desc, builder.cur_index);
+				RHIDescriptorWriteDesc desc_write_desc[4];
+				RHIDescriptorWriteDescBuilder builder(desc_write_desc, countof(desc_write_desc));
+				// TODO: move g_ue_per_frame_uniforms out of "for" loop
+				builder
+					.add(g_draw_calls[i].dset, 0, g_test_sampler,
+						 RHIImageLayout::kShaderReadOnlyOptimal, dc.view)
+					.add(g_draw_calls[i].dset, 1, g_ue_per_frame_uniforms[g_curFBIdx], 0,
+						 sizeof(UEPerFrameUniformBuf));
+				dev->UpdateDescriptorSet(desc_write_desc, builder.cur_index);
 
-			const IRHIDescriptorSet* sets[] = { dc.dset };
-			cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, pipeline->Layout(), sets, countof(sets));
+				const IRHIDescriptorSet *sets[] = {dc.dset, g_ue_vs_ub_ds[g_curFBIdx] };
+				uint32_t dyn_offsets[] = {dc.vs_ub_idx*g_ue_vs_ub_el_size}; 
+				cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, pipeline->Layout(), sets,
+									   countof(sets), countof(dyn_offsets), dyn_offsets);
 			}
 
 			if (dc.num_indices) {
-			cb->DrawIndexed(dc.num_indices, 1, dc.ib_offset, 0, 0);
+				cb->DrawIndexed(dc.num_indices, 1, dc.ib_offset, 0, 0);
 			} else {
 				cb->Draw(dc.num_vertices, 1, dc.ib_offset, 0);
 			}
@@ -1477,10 +1576,43 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 
 	g_ue_vb_size[g_curFBIdx] = 0;
 	g_ue_ib_size[g_curFBIdx] = 0;
+	g_ue_vs_ub_size[g_curFBIdx] = 0;
 	g_ue_dsets_reserved[g_curFBIdx] = 0;
 	g_draw_calls.resize(0);
 
 	sanity_lock_cnt--;
+}
+
+
+const IRHIImageView* GetCachedTexture(struct FTextureInfo *Texture, unsigned long PolyFlags, class IRHIDevice *dev) {
+
+	const IRHIImageView* rhi_texture = nullptr;
+	if (!g_texCache->isCached(Texture->CacheID)) {
+		TextureUploadTask* t;
+		g_texCache->cache(Texture, PolyFlags, dev, &t);
+		g_tex_upload_tasks.push_back(t);
+		rhi_texture = t->img_view;
+	} else {
+		if (Texture->bRealtimeChanged) {
+			TextureUploadTask* t;
+			g_texCache->update(Texture, PolyFlags, dev, &t);
+			g_tex_upload_tasks.push_back(t);
+		}
+		//Mask bit changed. Static texture, so must be deleted and recreated.
+		else if ((PolyFlags & PF_Masked) != 0 && !g_texCache->isMasked(Texture->CacheID))
+		{
+			assert(!"Handle this");
+			//delete & recache
+		}
+			
+		rhi_texture = g_texCache->get(Texture->CacheID);
+	}
+	
+	if (Texture->bRealtimeChanged) {
+		assert(Texture->bRealtime);
+	}
+
+	return rhi_texture;
 }
 
 /**
@@ -1504,34 +1636,12 @@ Complex surfaces are used for map geometry. They consist of facets which in turn
 void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Surface, FSurfaceFacet& Facet)
 {
 	assert(1 == sanity_lock_cnt);
+	check(Surface.Texture);
 
-	const IRHIImageView* rhi_texture = nullptr;
-	if (!g_texCache->isCached(Surface.Texture->CacheID)) {
-		TextureUploadTask* t;
-		g_texCache->cache(Surface.Texture, Surface.PolyFlags, g_vulkan_device, &t);
-		g_tex_upload_tasks.push_back(t);
-		rhi_texture = t->img_view;
-	} else {
-		if (Surface.Texture->bRealtimeChanged) {
-			TextureUploadTask* t;
-			g_texCache->update(Surface.Texture, Surface.PolyFlags, g_vulkan_device, &t);
-		g_tex_upload_tasks.push_back(t);
-		}
-		//Mask bit changed. Static texture, so must be deleted and recreated.
-		else if ((Surface.PolyFlags & PF_Masked) != 0 && !g_texCache->isMasked(Surface.Texture->CacheID))
-		{
-			assert(!"Handle this");
-			//delete & recache
-		}
-			
-		rhi_texture = g_texCache->get(Surface.Texture->CacheID);
-	}
-	
-	if (Surface.Texture->bRealtimeChanged) {
-		assert(Surface.Texture->bRealtime);
-	}
+	const IRHIImageView *rhi_texture =
+		GetCachedTexture(Surface.Texture, Surface.PolyFlags, g_vulkan_device);
 
-	//Code from OpenGL renderer to calculate texture coordinates
+	//Calculate UDot and VDot intermediates for complex surface
 	FLOAT UDot = Facet.MapCoords.XAxis | Facet.MapCoords.Origin;
 	FLOAT VDot = Facet.MapCoords.YAxis | Facet.MapCoords.Origin;
 
@@ -1543,14 +1653,26 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 	uint32_t& cur_vb_idx = g_ue_vb_size[g_curFBIdx];
 	uint32_t& cur_ib_idx = g_ue_ib_size[g_curFBIdx];
 
+	uint32_t& cur_vs_data_idx = g_ue_vs_ub_size[g_curFBIdx];
+	
+	BufferView<UEPerDrawCallVsData> vs_uniforms(g_ue_vs_ub[g_curFBIdx]->getMappedPtr(),
+												g_ue_vs_ub_el_size, g_ue_vs_ub_num_el);
+	vs_uniforms[cur_vs_data_idx].XAxis_UDot = vec4(*(vec3*)&Facet.MapCoords.XAxis.X, UDot);
+	vs_uniforms[cur_vs_data_idx].YAxis_VDot = vec4(*(vec3*)&Facet.MapCoords.YAxis.X, VDot);
+	vs_uniforms[cur_vs_data_idx].Diffuse_PanXY_UVMult =
+		vec4(Surface.Texture->Pan.X, Surface.Texture->Pan.Y, UMult, VMult);
+	cur_vs_data_idx++;
+
 	//Draw each polygon
 	for(FSavedPoly* Poly=Facet.Polys; Poly; Poly=Poly->Next )
 	{
 		const uint32_t vb_offset = cur_vb_idx;
 		const uint32_t ib_offset = cur_ib_idx;
 		
-		if(Poly->NumPts < 3) //Skip invalid polygons
+		if(Poly->NumPts < 3) {
+			log_info("Invalid polygon");
 			continue;
+		}
 
 		UEVertexComplex* VB = (UEVertexComplex*)g_ue_vb[g_curFBIdx]->getMappedPtr();
 		uint32_t* IB = (uint32_t*)g_ue_ib[g_curFBIdx]->getMappedPtr();
@@ -1573,7 +1695,7 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 		{
 			UEVertexComplex* v = VB + cur_vb_idx++;
 			
-			//Code from OpenGL renderer to calculate texture coordinates
+			// TODO: this can be doen in VS!
 			FLOAT U = Facet.MapCoords.XAxis | Poly->Pts[i]->Point;
 			FLOAT V = Facet.MapCoords.YAxis | Poly->Pts[i]->Point;
 			FLOAT UCoord = U-UDot;
@@ -1616,10 +1738,13 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 			Flags |= PF_Occlude;
 		}
 
+		// TODO: forget about tri fans, move to triangles and have one draw call per Facet! and not per poly
 		ComplexSurfaceDrawCall dc;
 		dc.pipeline_blend = select_blend(Flags);
 		dc.b_depth_write = select_depth_write(Flags);
 		dc.b_depth_clear = 0;
+		// TODO: if masked we should use DepthEqual because triangles are drawn on top of something
+		// which has been already drawn (see D3D9 renderer)
 		dc.b_alpha_test = Flags & PF_Masked;
 
 		// either alpha test or blend
@@ -1630,7 +1755,12 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 		dc.num_vertices = cur_vb_idx - vb_offset;
 		dc.ib_offset = ib_offset;
 		dc.num_indices = cur_ib_idx - ib_offset;
+		// should always equal to dc index in g_draw_calls array
+		// (however we have ClearZ which also adds draw call, so indices may be shifted, so let's
+		// have it for now)
+		dc.vs_ub_idx = cur_vs_data_idx-1;
 		dc.view = rhi_texture;
+		// TODO: rework this to a simple free list of dsets
 		if (g_ue_dsets[g_curFBIdx].size() == (size_t)g_ue_dsets_reserved[g_curFBIdx]) {
 			g_ue_dsets[g_curFBIdx].push_back(
 				g_vulkan_device->AllocateDescriptorSet(g_ue_ds_layout));

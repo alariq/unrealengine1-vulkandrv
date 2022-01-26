@@ -325,7 +325,8 @@ public:
 	virtual void BindPipeline(RHIPipelineBindPoint::Value bind_point, IRHIGraphicsPipeline* pipeline) ;
 	virtual void BindDescriptorSets(RHIPipelineBindPoint::Value bind_point,
 									const IRHIPipelineLayout* pipeline_layout,
-									const IRHIDescriptorSet *const*desc_sets, uint32_t count);
+									const IRHIDescriptorSet *const *desc_sets, uint32_t count,
+									uint32_t dyn_offsets_count, const uint32_t* dyn_offsets);
 
 };
 

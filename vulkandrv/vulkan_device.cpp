@@ -1082,7 +1082,8 @@ IRHIShader* RHIDeviceVk::CreateShader(RHIShaderStageFlagBits::Value stage, const
 
 
 ////////////// Buffer //////////////////////////////////////////////////
-RHIBufferVk* RHIBufferVk::Create(IRHIDevice* device, uint32_t size, uint32_t usage, uint32_t memprops, RHISharingMode::Value sharing) {
+RHIBufferVk *RHIBufferVk::Create(IRHIDevice *device, uint32_t size, uint32_t usage,
+								 uint32_t memprops, RHISharingMode::Value sharing) {
     VkBufferCreateInfo buffer_create_info = {
         VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,             // VkStructureType        sType
         nullptr,                                          // const void            *pNext
@@ -1337,6 +1338,7 @@ void Barrier(VkCommandBuffer cb, RHIImageVk* image,
 	image->vk_layout_ = new_layout;
 }
 
+// TODO: src_stage/dst_stage shoulg be bit masks!
 void RHICmdBufVk::BufferBarrier(IRHIBuffer *i_buffer, RHIAccessFlags src_acc_flags,
 								RHIPipelineStageFlags::Value src_stage, RHIAccessFlags dst_acc_fags,
 								RHIPipelineStageFlags::Value dst_stage) {
@@ -1451,7 +1453,7 @@ void RHICmdBufVk::BindPipeline(RHIPipelineBindPoint::Value bind_point, IRHIGraph
 
 void RHICmdBufVk::BindDescriptorSets(RHIPipelineBindPoint::Value bind_point,
 	const IRHIPipelineLayout* pipeline_layout,
-	const IRHIDescriptorSet*const* desc_sets, uint32_t count) {
+	const IRHIDescriptorSet*const* desc_sets, uint32_t count, uint32_t dyn_offsets_count, const uint32_t* dyn_offsets) {
 
 	const RHIPipelineLayoutVk* pipe_layout = ResourceCast(pipeline_layout);
 	//TODO: stack allocated array
@@ -1474,7 +1476,7 @@ void RHICmdBufVk::BindDescriptorSets(RHIPipelineBindPoint::Value bind_point,
 	// !NB: not sure why stack gets corrupted on assert(s) :-/
 	assert(pipe_layout->getDSLCount() == (int)count);
 	vkCmdBindDescriptorSets(cb_, translate_pbp(bind_point), pipe_layout->Handle(), 0,
-							(uint32_t)sets.size(), sets.data(), 0, nullptr);
+							(uint32_t)sets.size(), sets.data(), dyn_offsets_count, dyn_offsets);
 }
 
 void RHICmdBufVk::Draw(uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex,

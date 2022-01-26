@@ -790,7 +790,8 @@ public:
 	virtual void BindPipeline(RHIPipelineBindPoint::Value bind_point, IRHIGraphicsPipeline* pipeline) = 0;
 	virtual void BindDescriptorSets(RHIPipelineBindPoint::Value bind_point,
 									const class IRHIPipelineLayout* pipeline_layout,
-									const class IRHIDescriptorSet * const*desc_sets, uint32_t count) = 0;
+									const class IRHIDescriptorSet *const *desc_sets, uint32_t count,
+									uint32_t dyn_offsets_count, const uint32_t* dyn_offsets) = 0;
 	virtual void Draw(uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex,
 					  uint32_t first_instance) = 0;
 	virtual void DrawIndexed(uint32_t index_count, uint32_t instance_count, uint32_t first_index,
