@@ -6,8 +6,6 @@
 //#include "flext/flextVk.h"
 #include <vulkan/vulkan.h>
 
-
-
 #include "vulkan_rhi.h"
 #include "vulkan_device.h"
 #include "rhi.h"
@@ -15,7 +13,6 @@
 #include "utils/logging.h"
 #include "utils/macros.h"
 #include "utils/vec.h"
-
 
 #include <cassert>
 #include <vector>
@@ -41,8 +38,6 @@ struct v {
 };
 
 struct v V;
-
-
 
 #define GET_INSTANCE_PROC_ADDR(inst, entrypoint)                                                              \
     {                                                                                                         \
@@ -368,7 +363,7 @@ bool is_device_suitable(VkPhysicalDevice device, VkPhysicalDeviceProperties prop
 		check_device_extensions(device, req_device_ext) && swap_chain_ok;
 }
 
-bool pick_phys_device(VkInstance instance, VkSurfaceKHR surface, VkPhysicalDevice& phys_device) {
+bool pick_phys_device(VkInstance instance, VkSurfaceKHR surface, VkPhysicalDevice& phys_device, VkPhysicalDeviceProperties& phys_device_prop) {
 
     GET_INSTANCE_PROC_ADDR(instance, GetPhysicalDeviceSurfaceSupportKHR);
     GET_INSTANCE_PROC_ADDR(instance, GetPhysicalDeviceSurfaceCapabilitiesKHR);
@@ -403,6 +398,7 @@ bool pick_phys_device(VkInstance instance, VkSurfaceKHR surface, VkPhysicalDevic
 		vkGetPhysicalDeviceProperties2(device, &props);
 		if (is_device_suitable(device, props.properties, features.features, surface) && picked_name.empty()) {
 			phys_device = device;
+			phys_device_prop = props.properties;
 			picked_name = props.properties.deviceName;
 		}
 		log_info("Phys device: %s\n", props.properties.deviceName);
@@ -653,9 +649,13 @@ bool vulkan_initialize(HWND rw_handle) {
 		return false;
 	}
 
-	if (!pick_phys_device(vk_dev.instance_, vk_dev.surface_, vk_dev.phys_device_)) {
+	if (!pick_phys_device(vk_dev.instance_, vk_dev.surface_, vk_dev.phys_device_, vk_dev.vk_phys_device_prop_)) {
 		return false;
 	}
+
+	// fill device properties
+	vk_dev.phys_device_prop_.minUniformBufferOffsetAlignment =
+		vk_dev.vk_phys_device_prop_.limits.minUniformBufferOffsetAlignment;
 
 #if USE_GLAD_LOADER
     int glad_vk_version = gladLoaderLoadVulkan(vk_dev.instance_, vk_dev.phys_device_, NULL);

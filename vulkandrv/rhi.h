@@ -454,6 +454,11 @@ enum : uint32_t {
     kSubpassExternal = ~0U
 };
 
+////////////////////////////////////////////////////////////////////////////////
+struct RHIPhysDeviceProperties {
+    uint32_t minUniformBufferOffsetAlignment;
+    //...
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 struct RHIImageSubresourceRange {
@@ -965,6 +970,8 @@ public:
 	virtual bool OnWindowSizeChanged(uint32_t width, uint32_t height, bool fullscreen) = 0;
     virtual void SetOnSwapChainRecreatedCallback(fpOnSwapChainRecreated callback, void* user_ptr) = 0;
     virtual void WaitIdle() = 0;
+
+	virtual const RHIPhysDeviceProperties& GetProperties() const = 0;
 };
 #if 0
 struct RenderContext {

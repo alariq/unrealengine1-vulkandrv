@@ -52,6 +52,8 @@ struct VulkanDevice {
 	VkInstance instance_;
 	VkDebugUtilsMessengerEXT debug_messenger_;
 	VkPhysicalDevice phys_device_;// = VK_NULL_HANDLE;
+	VkPhysicalDeviceProperties vk_phys_device_prop_;
+	RHIPhysDeviceProperties phys_device_prop_;
 	SwapChainData swap_chain_data_;
 	SwapChain swap_chain_;
 	QueueFamilies queue_families_;
@@ -439,6 +441,11 @@ public:
 		fp_swap_chain_recreated_ = callback;
 		user_ptr_ = user_ptr;
 	}
+
+	const RHIPhysDeviceProperties& GetProperties() const override {
+		return dev_.phys_device_prop_;	
+	}
+
 
     virtual void WaitIdle() override;
 };
