@@ -85,7 +85,7 @@ struct SimpleVertex {
 };
 struct UEVertexComplex {
 	vec3 Pos;
-	vec2 TexCoord;
+	vec2 TexCoord[2];
 	//uint32_t Flags;
 };
 
@@ -107,6 +107,8 @@ struct UEPerDrawCallVsData {
 	vec4 XAxis_UDot;
 	vec4 YAxis_VDot;
 	vec4 Diffuse_PanXY_UVMult;
+	vec4 Lightmap_PanXY_UVMult;
+	vec4 HasLightmap_UVScale;
 };
 
 struct UEPerFrameUniformBuf {
@@ -141,10 +143,12 @@ RHIVertexInputAttributeDesc world_model_va_desc[] = {
 	 offsetof(SVD, uv)}};
 
 RHIVertexInputAttributeDesc ue_complex_va_desc[] = {
-	{0, ue_complex_va_desc[0].binding, RHIFormat::kR32G32B32_SFLOAT,
+	{0, ue_complex_vert_bindings_desc[0].binding, RHIFormat::kR32G32B32_SFLOAT,
 	 offsetof(UEVertexComplex, Pos)},
-	{1, ue_complex_va_desc[0].binding, RHIFormat::kR32G32_SFLOAT,
-	 offsetof(UEVertexComplex, TexCoord)}};
+	{1, ue_complex_vert_bindings_desc[0].binding, RHIFormat::kR32G32_SFLOAT,
+	 offsetof(UEVertexComplex, TexCoord[0])},
+	{2, ue_complex_vert_bindings_desc[0].binding, RHIFormat::kR32G32_SFLOAT,
+	 offsetof(UEVertexComplex, TexCoord[1])}};
 
 // Create Test Vertex Buffer
 SimpleVertex vb[] = {{{-0.55f, -0.55f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
@@ -365,7 +369,8 @@ struct ComplexSurfaceDrawCall {
 	//TODO: just for check
 	uint32_t vs_ub_idx;
 	IRHIDescriptorSet* dset;
-	const IRHIImageView* view;
+	const IRHIImageView* diffuse;
+	const IRHIImageView* lightmap;
 	PipelineBlend pipeline_blend;
 	bool b_depth_write;
 	bool b_depth_clear;
@@ -731,11 +736,14 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	g_quad_vb_copy_event = device->CreateEvent();
 
 	RHIDescriptorSetLayoutDesc ue_dsl_desc[] = {
+		// diffuse
 		{RHIDescriptorType::kCombinedImageSampler, RHIShaderStageFlagBits::kFragment, 1, 0},
+		// lightmap
+		{RHIDescriptorType::kCombinedImageSampler, RHIShaderStageFlagBits::kFragment, 1, 1},
 		// per frame
-		{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment | RHIShaderStageFlagBits::kVertex, 1, 1},
-		// per draw call
 		{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment | RHIShaderStageFlagBits::kVertex, 1, 2},
+		// per draw call
+		{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment | RHIShaderStageFlagBits::kVertex, 1, 3},
 	};
 
 	RHIDescriptorSetLayoutDesc ue_vs_dsl_desc[] = {
@@ -1539,11 +1547,14 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 				RHIDescriptorWriteDesc desc_write_desc[4];
 				RHIDescriptorWriteDescBuilder builder(desc_write_desc, countof(desc_write_desc));
 				// TODO: move g_ue_per_frame_uniforms out of "for" loop
-				builder
-					.add(g_draw_calls[i].dset, 0, g_test_sampler,
-						 RHIImageLayout::kShaderReadOnlyOptimal, dc.view)
-					.add(g_draw_calls[i].dset, 1, g_ue_per_frame_uniforms[g_curFBIdx], 0,
-						 sizeof(UEPerFrameUniformBuf));
+				builder.add(g_draw_calls[i].dset, 0, g_test_sampler,
+							RHIImageLayout::kShaderReadOnlyOptimal, dc.diffuse);
+				if (dc.lightmap) {
+					builder.add(g_draw_calls[i].dset, 1, g_test_sampler,
+								RHIImageLayout::kShaderReadOnlyOptimal, dc.lightmap);
+				}
+				builder.add(g_draw_calls[i].dset, 2, g_ue_per_frame_uniforms[g_curFBIdx], 0,
+							sizeof(UEPerFrameUniformBuf));
 				dev->UpdateDescriptorSet(desc_write_desc, builder.cur_index);
 
 				const IRHIDescriptorSet *sets[] = {dc.dset, g_ue_vs_ub_ds[g_curFBIdx] };
@@ -1608,9 +1619,9 @@ const IRHIImageView* GetCachedTexture(struct FTextureInfo *Texture, unsigned lon
 		rhi_texture = g_texCache->get(Texture->CacheID);
 	}
 	
-	if (Texture->bRealtimeChanged) {
-		assert(Texture->bRealtime);
-	}
+	//if (Texture->bRealtimeChanged) {
+	//	assert(Texture->bRealtime);
+	//}
 
 	return rhi_texture;
 }
@@ -1638,8 +1649,14 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 	assert(1 == sanity_lock_cnt);
 	check(Surface.Texture);
 
-	const IRHIImageView *rhi_texture =
+	const IRHIImageView *rhi_lightmap = nullptr;
+	const IRHIImageView *rhi_diffuse =
 		GetCachedTexture(Surface.Texture, Surface.PolyFlags, g_vulkan_device);
+
+	if (Surface.LightMap) {
+		rhi_lightmap = GetCachedTexture(Surface.LightMap, Surface.PolyFlags, g_vulkan_device);
+		check(rhi_lightmap);
+	}
 
 	//Calculate UDot and VDot intermediates for complex surface
 	FLOAT UDot = Facet.MapCoords.XAxis | Facet.MapCoords.Origin;
@@ -1647,6 +1664,7 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 
 	const float UMult = 1.0f / (Surface.Texture->UScale * Surface.Texture->USize);
 	const float VMult = 1.0f / (Surface.Texture->VScale * Surface.Texture->VSize);
+	float LM_UMult = 0, LM_VMult = 0;
 
 	uint32_t Flags = Surface.PolyFlags;
 
@@ -1657,10 +1675,24 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 	
 	BufferView<UEPerDrawCallVsData> vs_uniforms(g_ue_vs_ub[g_curFBIdx]->getMappedPtr(),
 												g_ue_vs_ub_el_size, g_ue_vs_ub_num_el);
-	vs_uniforms[cur_vs_data_idx].XAxis_UDot = vec4(*(vec3*)&Facet.MapCoords.XAxis.X, UDot);
-	vs_uniforms[cur_vs_data_idx].YAxis_VDot = vec4(*(vec3*)&Facet.MapCoords.YAxis.X, VDot);
+	vs_uniforms[cur_vs_data_idx].XAxis_UDot = vec4(*(vec3 *)&Facet.MapCoords.XAxis.X, UDot);
+	vs_uniforms[cur_vs_data_idx].YAxis_VDot = vec4(*(vec3 *)&Facet.MapCoords.YAxis.X, VDot);
 	vs_uniforms[cur_vs_data_idx].Diffuse_PanXY_UVMult =
 		vec4(Surface.Texture->Pan.X, Surface.Texture->Pan.Y, UMult, VMult);
+	if (Surface.LightMap) {
+		float UScale = Surface.LightMap->UScale;
+		float VScale = Surface.LightMap->VScale;
+		float USize = Surface.LightMap->USize;
+		float VSize = Surface.LightMap->VSize;
+		LM_UMult = 1.0f / (UScale * USize);
+		LM_VMult = 1.0f / (VScale * VSize);
+		vs_uniforms[cur_vs_data_idx].Lightmap_PanXY_UVMult =
+			vec4(Surface.LightMap->Pan.X, Surface.LightMap->Pan.Y, LM_UMult, LM_VMult);
+		vs_uniforms[cur_vs_data_idx].HasLightmap_UVScale = vec4(1, UScale, VScale, 0);
+	} else {
+		vs_uniforms[cur_vs_data_idx].HasLightmap_UVScale.x = 0;
+	}
+
 	cur_vs_data_idx++;
 
 	//Draw each polygon
@@ -1702,15 +1734,17 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 			FLOAT VCoord = V-VDot;
 
 			//Diffuse texture coordinates
-			v->TexCoord.x = (UCoord-Surface.Texture->Pan.X)*UMult;
-			v->TexCoord.y = (VCoord-Surface.Texture->Pan.Y)*VMult;
-#if 0
+			v->TexCoord[0].x = (UCoord-Surface.Texture->Pan.X)*UMult;
+			v->TexCoord[0].y = (VCoord-Surface.Texture->Pan.Y)*VMult;
+
 			if(Surface.LightMap)
 			{
 				//Lightmaps require pan correction of -.5
-				v->TexCoord[1].x = (UCoord-(Surface.LightMap->Pan.X-0.5f*Surface.LightMap->UScale) )*lightMap->multU; 
-				v->TexCoord[1].y = (VCoord-(Surface.LightMap->Pan.Y-0.5f*Surface.LightMap->VScale) )*lightMap->multV;
+				v->TexCoord[1].x = (UCoord-(Surface.LightMap->Pan.X-0.5f*Surface.LightMap->UScale) )*LM_UMult; 
+				v->TexCoord[1].y = (VCoord-(Surface.LightMap->Pan.Y-0.5f*Surface.LightMap->VScale) )*LM_VMult;
 			}
+
+#if 0
 			if(Surface.DetailTexture)
 			{
 				v->TexCoord[2].x = (UCoord-Surface.DetailTexture->Pan.X)*detail->multU; 
@@ -1759,7 +1793,8 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 		// (however we have ClearZ which also adds draw call, so indices may be shifted, so let's
 		// have it for now)
 		dc.vs_ub_idx = cur_vs_data_idx-1;
-		dc.view = rhi_texture;
+		dc.diffuse = rhi_diffuse;
+		dc.lightmap = rhi_lightmap;
 		// TODO: rework this to a simple free list of dsets
 		if (g_ue_dsets[g_curFBIdx].size() == (size_t)g_ue_dsets_reserved[g_curFBIdx]) {
 			g_ue_dsets[g_curFBIdx].push_back(
@@ -1799,7 +1834,8 @@ void UVulkanRenderDevice::ClearZ(FSceneNode* Frame)
 	dc.num_vertices = 6;
 	dc.ib_offset = 0;
 	dc.num_indices = 0;
-	dc.view = nullptr;
+	dc.diffuse = nullptr;
+	dc.lightmap = nullptr;
 	dc.dset = nullptr;
 	g_draw_calls.emplace_back(dc);
 

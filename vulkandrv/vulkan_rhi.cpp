@@ -77,7 +77,7 @@ std::vector<const char*> get_validation_layers() {
 	vkEnumerateInstanceLayerProperties(&count, available_layers.data());
 
 	std::vector<const char*> actual_layer_names2enable;
-
+#if USE_NSIGHT // otherwise crashes
 	for (int i = 0; i < countof(s_validation_layers); ++i) {
 		const char* name = s_validation_layers[i];
 		bool b_found = false;
@@ -95,6 +95,7 @@ std::vector<const char*> get_validation_layers() {
 			log_warning("Validation layer %s is not available, will not be enabled\n", name);
 		}
 	}
+#endif
 	return actual_layer_names2enable;
 }
 

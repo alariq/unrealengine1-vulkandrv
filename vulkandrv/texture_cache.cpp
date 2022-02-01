@@ -63,8 +63,16 @@ struct CacheImpl {
 	std::unordered_map<unsigned __int64, CachedTexture> thash;
 };
 
-
-int getTextureSize(RHIFormat fmt, int w, int h) { assert(!"Not implemented"); return -1; }
+int getTextureSize(RHIFormat fmt, int w, int h) {
+	switch (fmt) {
+	case RHIFormat::kB8G8R8A8_UNORM:
+	case RHIFormat::kR8G8B8A8_UNORM:
+		return w * h * 4;
+	default:
+		assert(!"Not implemented");
+		return -1;
+	}
+}
 
 MipInfo convertMip(const FTextureInfo *TexInfo, const TextureFormat &format, DWORD PolyFlags,
 				   int mipLevel) {
