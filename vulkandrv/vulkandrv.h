@@ -46,8 +46,10 @@ private:
 		int autoFOV; /**< Turn on auto field of view setting */
 		int FPSLimit; /**< 60FPS frame limiter */
 		int unlimitedViewDistance; /**< Set frustum to max map size */
+		UBOOL ColorizeDetailTextures;
 	} options;
 
+	DWORD m_detailTextureColor4ub; 
 public:
 	UVulkanRenderDevice();
 

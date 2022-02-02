@@ -3,14 +3,15 @@
 layout(location = 0) in vec3 Pos;
 layout(location = 1) in vec2 TexCoord;
 layout(location = 2) in vec2 LightmapTexCoord;
+layout(location = 3) in vec2 DetailTexCoord;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Should be in sync with FS
-layout(set=0, binding=2) uniform PerFrameData_t {
+layout(set=0, binding=3) uniform PerFrameData_t {
     mat4 proj; // not really per frame though :-)
 } PerFrameData;
 
-layout(set=0, binding=3) uniform PerDrawCallData_t {
+layout(set=0, binding=4) uniform PerDrawCallData_t {
     mat4 model;
 } PerDrawCallData;
 
@@ -21,6 +22,8 @@ layout(set=1, binding=0) uniform PerDrawCallVSData_t {
     vec4 Diffuse_PanXY_UVMult;
     vec4 Lightmap_PanXY_UVMult;
     vec4 HasLightmap_UVScale;
+	vec4 Detail_PanXY_UVMult;
+	vec4 HasDetail_UVScale;
 } PerDrawVSData;
 
 
@@ -33,6 +36,7 @@ out gl_PerVertex
 
 layout(location = 0) out vec2 v_TexCoord;
 layout(location = 1) out vec2 v_LightmapTexCoord;
+layout(location = 2) out vec4 v_DetailTexCoord;
 
 void main() {
     gl_Position = vec4(Pos.xyz,1) * /*PerFrameData.world * PerFrameData.view * */PerFrameData.proj;
@@ -60,10 +64,23 @@ void main() {
         vec2 Lightmap_UVScale = PerDrawVSData.HasLightmap_UVScale.yz;
 
 	    v_LightmapTexCoord = (Coord - (Lightmap_Pan - 0.5*Lightmap_UVScale))*Lightmap_UVMult;
-
     }
     else {
 	    v_LightmapTexCoord = vec2(-1, -1);
+    }
+
+    if(PerDrawVSData.HasDetail_UVScale.x>0) {
+        vec2 Detail_Pan = PerDrawVSData.Detail_PanXY_UVMult.xy;
+        vec2 Detail_UVMult = PerDrawVSData.Detail_PanXY_UVMult.zw;
+        //vec2 Detail_UVScale = PerDrawVSData.HasDetail_UVScale.yz;
+
+	    v_DetailTexCoord.xy = (Coord - Detail_Pan)*Detail_UVMult;
+        // detail scale from D3D9 renderer
+        v_DetailTexCoord.xy *= 4.223;
+        v_DetailTexCoord.zw = vec2(Pos.z, 0);
+    }
+    else {
+	    v_DetailTexCoord = vec4(-1, -1, 0,0);
     }
 
 

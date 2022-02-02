@@ -10,6 +10,7 @@
 #include <cassert>
 #include <memory>
 #include <vector>
+#include <set> // only for 1 place for quick sanity check (TODO: remove later)
 
 #define VK_CHECK(x){\
     VkResult r = (x);\
@@ -1985,12 +1986,15 @@ IRHISampler *RHIDeviceVk::CreateSampler(const RHISamplerDesc& desc) {
 // yes, I am returning vector by value... should not all those cool compilers do a "move", RVO or any other shenanigans?
 static std::vector<VkDescriptorSetLayoutBinding> translate_dsl_bindings(const RHIDescriptorSetLayoutDesc* desc, int count) {
 	std::vector<VkDescriptorSetLayoutBinding> bindings(count);
+	std::set<int> test;
 	for (int i = 0; i < count; ++i) {
 		bindings[i].binding = desc[i].binding;
 		bindings[i].descriptorCount = desc[i].count;
 		bindings[i].descriptorType = translate_desc_type(desc[i].type);
 		bindings[i].stageFlags = translate_ssflags(desc[i].shader_stage_flags);
 		bindings[i].pImmutableSamplers = nullptr; // TODO:
+		assert(test.count(desc[i].binding) == 0);
+		test.insert(desc[i].binding);
 	}
 	return bindings;
 }
