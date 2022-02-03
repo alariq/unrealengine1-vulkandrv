@@ -36,9 +36,9 @@ void Paletted2RGBA8(const FTextureInfo *, DWORD flags, DWORD* dst, uint32_t dst_
 
 // Unreal to vulkan
 const static TextureFormat g_format_reg[] = {
-	{true, 0, 0, false, RHIFormat::kR8G8B8A8_UNORM, &Paletted2RGBA8}, /**< TEXF_P8 = 0x00 */
-	{true, 0, 0, true, RHIFormat::kR8G8B8A8_UNORM, nullptr},		  /**< TEXF_RGBA7	= 0x01 */
-	{false, 0, 0, true, RHIFormat::kR8G8B8A8_UNORM, nullptr},		  /**< TEXF_RGB16	= 0x02 */
+	{true, 0, 0, false, RHIFormat::kR8G8B8A8_SRGB, &Paletted2RGBA8}, /**< TEXF_P8 = 0x00 */
+	{true, 0, 0, true, RHIFormat::kR8G8B8A8_SRGB, nullptr},		  /**< TEXF_RGBA7	= 0x01 */
+	{false, 0, 0, true, RHIFormat::kR8G8B8A8_SRGB, nullptr},		  /**< TEXF_RGB16	= 0x02 */
 #if 0
 	{true,4,8,true,DXGI_FORMAT_BC1_UNORM,nullptr},									/**< TEXF_DXT1 = 0x03 */
 	{false,0,0,true,DXGI_FORMAT_UNKNOWN,nullptr},									/**< TEXF_RGB8 = 0x04 */
@@ -66,7 +66,9 @@ struct CacheImpl {
 int getTextureSize(RHIFormat fmt, int w, int h) {
 	switch (fmt) {
 	case RHIFormat::kB8G8R8A8_UNORM:
+	case RHIFormat::kB8G8R8A8_SRGB:
 	case RHIFormat::kR8G8B8A8_UNORM:
+	case RHIFormat::kR8G8B8A8_SRGB:
 		return w * h * 4;
 	default:
 		assert(!"Not implemented");
@@ -184,6 +186,9 @@ bool TextureCache::cache(FTextureInfo *TexInfo, DWORD PolyFlags, IRHIDevice *dev
 	}
 
 	const TextureFormat &format = g_format_reg[(int)TexInfo->Format];
+	if((int)TexInfo->Format > TEXF_RGBA7) {
+		int asdf =0;
+	}
 	if (format.b_is_supported == false) {
 		log_error("Texture type <%d> is unsupported (yet?).\n", TexInfo->Format);
 		return false;
