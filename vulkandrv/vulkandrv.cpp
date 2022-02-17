@@ -151,7 +151,7 @@ RHIVertexInputAttributeDesc ue_complex_va_desc[] = {
 	{0, ue_complex_vert_bindings_desc[0].binding, RHIFormat::kR32G32B32_SFLOAT,
 	 offsetof(UEVertexComplex, Pos)},
 	{1, ue_complex_vert_bindings_desc[0].binding, RHIFormat::kR32G32_SFLOAT,
-	 offsetof(UEVertexComplex, TexCoord[1])}};
+	 offsetof(UEVertexComplex, TexCoord)}};
 
 // Create Test Vertex Buffer
 SimpleVertex vb[] = {{{-0.55f, -0.55f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
@@ -535,7 +535,7 @@ RHIColorBlendAttachmentState create_blend_att_state(bool b_enable, RHIBlendFacto
 }
 
 static const RHIColorBlendAttachmentState no_blend_att_state = create_blend_att_state(false, RHIBlendFactor::One, RHIBlendFactor::Zero);
-static const RHIColorBlendAttachmentState modulated_blend_att_state = create_blend_att_state(true, RHIBlendFactor::SrcColor, RHIBlendFactor::DstColor);
+static const RHIColorBlendAttachmentState modulated_blend_att_state = create_blend_att_state(true, RHIBlendFactor::DstColor, RHIBlendFactor::SrcColor);
 static const RHIColorBlendAttachmentState translucent_blend_att_state = create_blend_att_state(true, RHIBlendFactor::One, RHIBlendFactor::OneMinusSrcColor);
 static const RHIColorBlendAttachmentState alpha_blend_att_state = create_blend_att_state(true, RHIBlendFactor::SrcAlpha, RHIBlendFactor::OneMinusSrcAlpha);
 // TODO: just disable color writes, okay...
