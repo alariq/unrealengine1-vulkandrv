@@ -36,21 +36,33 @@ vec4 BGRA7_to_RGBA8(vec4 c) {
 }
 
 vec4 gamma2linear_rgb(vec4 c) {
+#if defined(USE_GAMMA)
     vec4 r;
     r.rgb = pow(c.rgb,vec3(2.2));
     r.w = c.w;
     return r;
+#else
+    return c;
+#endif
 }
 
 vec3 gamma2linear(vec3 c) {
+#if defined(USE_GAMMA)
     return pow(c,vec3(2.2));
+#else
+    return c;
+#endif
 }
 
 vec4 linear2gamma_rgb(vec4 c) {
+#if defined(USE_GAMMA)
     vec4 r;
     r.rgb = pow(c.rgb,vec3(1.0/2.8));
     r.w = c.w;
     return r;
+#else 
+    return c;
+#endif
 }
 
 void main() {
@@ -62,9 +74,6 @@ void main() {
     }
 #endif
 
-    vec4 lightmap = gamma2linear_rgb(texture(LightmapTex, v_LightmapTexCoord));
-    vec4 detail = gamma2linear_rgb(texture(DetailTex, v_DetailTexCoord.xy));
-    vec4 macro = gamma2linear_rgb(texture(MacroTex, v_MacroTexCoord.xy));
 
     const float OneXBlending = 0;
     const vec4 c0 = vec4(0,0,0, 2 - OneXBlending);
@@ -72,11 +81,13 @@ void main() {
     const float is_fog = v_DetailTexCoord.w;
 
     if(v_MacroTexCoord.x>=0 && v_MacroTexCoord.y>=0) {
+        vec4 macro = gamma2linear_rgb(texture(MacroTex, v_MacroTexCoord.xy));
         albedo.rgb = c0.a * albedo.rgb * macro.rgb;
     }
 
     // detail
     if(v_DetailTexCoord.x>=0 && v_DetailTexCoord.y>=0 && is_fog<0.5) {
+        vec4 detail = gamma2linear_rgb(texture(DetailTex, v_DetailTexCoord.xy));
         // reconstructed after D3D9 assembly
         float vPosZ = v_DetailTexCoord.z;
         float k = clamp(vPosZ *Z_SCALE, 0,1); // vpos.z
@@ -86,11 +97,13 @@ void main() {
 
     // in D3D9 first lightmap is blended and then detail, but I think applying lightmapshould be done after detail
     if(v_LightmapTexCoord.x>=0 && v_LightmapTexCoord.y>=0) {
+        vec4 lightmap = gamma2linear_rgb(texture(LightmapTex, v_LightmapTexCoord));
         albedo = c0.a * albedo * BGRA7_to_RGBA8(lightmap);
     }
 
     // fog
     if(v_DetailTexCoord.x>=0 && v_DetailTexCoord.y>=0 && is_fog>0.5) {
+        vec4 detail = gamma2linear_rgb(texture(DetailTex, v_DetailTexCoord.xy));
         vec4 fog = BGRA7_to_RGBA8(detail);
         float k = c1.a - fog.a;
         albedo.rgb = albedo.rgb*k + fog.rgb;

@@ -50,6 +50,20 @@ private:
 	} options;
 
 	DWORD m_detailTextureColor4ub; 
+
+	// runtime changed variables
+	float m_RProjZ;
+	float m_Aspect;
+	float m_Fov;
+	float FrameX, FrameY;
+	float FrameFX, FrameFY;
+	float FrameXB, FrameYB;
+	float m_RFX2, m_RFY2; 
+	bool m_nearZRangeHackProjectionActive;
+	bool m_useZRangeHack;
+
+	void SetProjection(bool requestNearZRangeHackProjection);
+	void SetOrthoProjection(void);
 public:
 	UVulkanRenderDevice();
 

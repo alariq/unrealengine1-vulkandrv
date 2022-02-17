@@ -1919,5 +1919,14 @@
     <CustomBuild Include="shaders\complex-surface-atest.frag">
       <Filter>shaders</Filter>
     </CustomBuild>
+    <CustomBuild Include="shaders\gouraud-surface.frag">
+      <Filter>shaders</Filter>
+    </CustomBuild>
+    <CustomBuild Include="shaders\gouraud-surface.vert">
+      <Filter>shaders</Filter>
+    </CustomBuild>
+    <CustomBuild Include="shaders\gouraud-surface-atest.frag">
+      <Filter>shaders</Filter>
+    </CustomBuild>
   </ItemGroup>
 </Project>

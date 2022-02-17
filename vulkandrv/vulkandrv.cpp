@@ -55,6 +55,27 @@ static LARGE_INTEGER perfCounterFreq;
 //static Shader_ComplexSurface *shader_ComplexSurface;
 //static Shader_FogSurface *shader_FogSurface;
 
+static inline DWORD bgra_make(BYTE b, BYTE g, BYTE r, BYTE a) {
+	return (a << 24) | (r << 16) | (g << 8) | b;
+}
+static inline DWORD FPlaneTo_BGRScaled_A255(const FPlane *pPlane, FLOAT rgbScale) {
+	return bgra_make(appRound(pPlane->Z * rgbScale), appRound(pPlane->Y * rgbScale),
+					 appRound(pPlane->X * rgbScale), 255);
+}
+static inline DWORD FPlaneTo_BGR_A0(const FPlane *pPlane) {
+	return bgra_make(appRound(pPlane->Z * 255.0f), appRound(pPlane->Y * 255.0f),
+					 appRound(pPlane->X * 255.0f), 0);
+}
+static inline DWORD FPlaneTo_BGRAClamped(const FPlane *pPlane) {
+	return bgra_make(
+		Clamp(appRound(pPlane->Z * 255.0f), 0, 255), Clamp(appRound(pPlane->Y * 255.0f), 0, 255),
+		Clamp(appRound(pPlane->X * 255.0f), 0, 255), Clamp(appRound(pPlane->W * 255.0f), 0, 255));
+}
+static inline DWORD FPlaneTo_BGRClamped_A255(const FPlane *pPlane) {
+	return bgra_make(Clamp(appRound(pPlane->Z * 255.0f), 0, 255),
+					 Clamp(appRound(pPlane->Y * 255.0f), 0, 255),
+					 Clamp(appRound(pPlane->X * 255.0f), 0, 255), 255);
+}
 
 template <typename T> // all memebers should be templated?
 struct BufferView {
@@ -87,6 +108,13 @@ struct UEVertexComplex {
 	vec3 Pos;
 	vec2 TexCoord;
 	//uint32_t Flags;
+};
+
+struct UEVertexGouraud {
+	vec3 Pos;
+	vec4 TexCoord;
+	DWORD Color;
+	DWORD FogColor;
 };
 
 struct PerFrameUniforms {
@@ -131,6 +159,9 @@ RHIVertexInputBindingDesc svd_vert_bindings_desc[] = {
 RHIVertexInputBindingDesc ue_complex_vert_bindings_desc[] = {
 	{0, sizeof(UEVertexComplex), RHIVertexInputRate::kVertex}};
 
+RHIVertexInputBindingDesc ue_gouraud_vert_bindings_desc[] = {
+	{0, sizeof(UEVertexGouraud), RHIVertexInputRate::kVertex}};
+
 RHIVertexInputAttributeDesc va_desc[] = {
 	{0, vert_bindings_desc[0].binding, RHIFormat::kR32G32B32A32_SFLOAT,
 	 offsetof(SimpleVertex, pos)},
@@ -152,6 +183,16 @@ RHIVertexInputAttributeDesc ue_complex_va_desc[] = {
 	 offsetof(UEVertexComplex, Pos)},
 	{1, ue_complex_vert_bindings_desc[0].binding, RHIFormat::kR32G32_SFLOAT,
 	 offsetof(UEVertexComplex, TexCoord)}};
+
+RHIVertexInputAttributeDesc ue_gouraud_va_desc[] = {
+	{0, ue_gouraud_vert_bindings_desc[0].binding, RHIFormat::kR32G32B32_SFLOAT,
+	 offsetof(UEVertexGouraud, Pos)},
+	{1, ue_gouraud_vert_bindings_desc[0].binding, RHIFormat::kR32G32B32A32_SFLOAT,
+	 offsetof(UEVertexGouraud, TexCoord)},
+	{2, ue_gouraud_vert_bindings_desc[0].binding, RHIFormat::kB8G8R8A8_UNORM,
+	 offsetof(UEVertexGouraud, Color)},
+	{3, ue_gouraud_vert_bindings_desc[0].binding, RHIFormat::kB8G8R8A8_UNORM,
+	 offsetof(UEVertexGouraud, FogColor)}};
 
 // Create Test Vertex Buffer
 SimpleVertex vb[] = {{{-0.55f, -0.55f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
@@ -340,26 +381,37 @@ enum PipelineBlend : uint8_t {
 	kPipeBlendInvisible,
 	kPipeBlendCount
 };
+
+enum SurfaceShader : uint8_t {
+	kSurfaceShaderComplex,
+	kSurfaceShaderGouraud,
+	kSurfaceShaderClearDepth,
+};
+
 const uint32_t BLEND_MODE_MASK = 0x7;
 const uint32_t DEPTH_MODE_MASK = 0x1;
 const uint32_t ALPHA_TEST_MASK = 0x1;
 const uint32_t DEPTH_CLEAR_MASK = 0x1;
+const uint32_t SURFACE_SHADER_MASK = 0x3;
 
 const uint32_t BLEND_MODE_OFFSET = 0;
 const uint32_t DEPTH_MODE_OFFSET = 3;
 const uint32_t ALPHA_TEST_OFFSET = 4;
 const uint32_t DEPTH_CLEAR_OFFSET = 5;
+const uint32_t SURFACE_SHADER_OFFSET = 7;
 
-uint32_t make_key(PipelineBlend blend, bool depth_write, bool alpha_test, bool depth_clear) {
+uint32_t make_key(SurfaceShader shader, PipelineBlend blend, bool depth_write, bool alpha_test) {
+	uint32_t s = (uint32_t)shader;
 	uint32_t b = (uint32_t)blend;
 	uint32_t dw = !!depth_write;
 	uint32_t at = !!alpha_test;
-	uint32_t clear = !!depth_clear;
+	//uint32_t clear = !!depth_clear;
 
 	uint32_t rv = ((b & BLEND_MODE_MASK) << BLEND_MODE_OFFSET) |
 				  ((dw & DEPTH_MODE_MASK) << DEPTH_MODE_OFFSET) |
 				  ((at & ALPHA_TEST_MASK) << ALPHA_TEST_OFFSET) |
-				  ((clear & DEPTH_CLEAR_MASK) << DEPTH_CLEAR_OFFSET);
+				  //((clear & DEPTH_CLEAR_MASK) << DEPTH_CLEAR_OFFSET) |
+				  ((s & SURFACE_SHADER_MASK) << SURFACE_SHADER_OFFSET);
 
 	return rv;
 }
@@ -378,8 +430,8 @@ struct ComplexSurfaceDrawCall {
 	const IRHIImageView* detail;
 	PipelineBlend pipeline_blend;
 	bool b_depth_write;
-	bool b_depth_clear;
 	bool b_alpha_test;
+	SurfaceShader surface_shader;
 };
 
 const uint32_t gUENumVert = 256 * 1024;
@@ -387,12 +439,20 @@ const uint32_t gUENumIndices = 256 * 1024;
 // expect no more than 1k draw calls per frame
 // TODO: we will come up with reallocation of course,.. later
 const uint32_t gUEDrawCalls = 1000;
-// IB
-SBuffer* g_ue_vb[kNumBufferedFrames] = { 0 };
-uint32_t g_ue_vb_size[kNumBufferedFrames] = { 0 };
-// VB
-SBuffer* g_ue_ib[kNumBufferedFrames] = { 0 };
-uint32_t g_ue_ib_size[kNumBufferedFrames] = { 0 };
+// Complex IB
+SBuffer* g_ue_complex_vb[kNumBufferedFrames] = { 0 };
+uint32_t g_ue_complex_vb_size[kNumBufferedFrames] = { 0 };
+// Complex VB
+SBuffer* g_ue_complex_ib[kNumBufferedFrames] = { 0 };
+uint32_t g_ue_complex_ib_size[kNumBufferedFrames] = { 0 };
+
+// Gouraud IB
+SBuffer* g_ue_gouraud_vb[kNumBufferedFrames] = { 0 };
+uint32_t g_ue_gouraud_vb_size[kNumBufferedFrames] = { 0 };
+// Gouraud VB
+SBuffer* g_ue_gouraud_ib[kNumBufferedFrames] = { 0 };
+uint32_t g_ue_gouraud_ib_size[kNumBufferedFrames] = { 0 };
+
 // dynamic UB for VS per draw call data
 SBuffer* g_ue_vs_ub[kNumBufferedFrames] = { 0 };
 uint32_t g_ue_vs_ub_el_size = 0;
@@ -400,18 +460,23 @@ const uint32_t g_ue_vs_ub_num_el = gUEDrawCalls;
 uint32_t g_ue_vs_ub_size[kNumBufferedFrames] = { 0 };
 // descriptor set (one per frame) designed to store per frame data (proj. matrix and stuff)
 // for now only stores VS data using dynamic UB (so no need to have ds per draw call)
-IRHIDescriptorSetLayout* g_ue_vs_ub_ds_layout = 0;
+IRHIDescriptorSetLayout* g_ue_vs_ub_dsl = 0;
 IRHIDescriptorSet* g_ue_vs_ub_ds[kNumBufferedFrames] = {0};
 
 SShader* g_ue_complex_shader = nullptr;
 SShader* g_ue_complex_shader_alpha_test = nullptr;
-IRHIGraphicsPipeline *g_ue_pipeline = nullptr;
+SShader* g_ue_gouraud_shader = nullptr;
+SShader* g_ue_gouraud_shader_alpha_test = nullptr;
 
-IRHIDescriptorSetLayout* g_ue_ds_layout = 0;
-std::vector<IRHIDescriptorSet*> g_ue_dsets[kNumBufferedFrames];
+IRHIDescriptorSetLayout* g_ue_dsl_complex= 0;
+IRHIDescriptorSetLayout* g_ue_dsl_gouraud = 0;
+std::vector<IRHIDescriptorSet*> g_ue_complex_dsets[kNumBufferedFrames];
+std::vector<IRHIDescriptorSet*> g_ue_gouraud_dsets[kNumBufferedFrames];
 // NOTE: do not actually need to make this kNumBufferedFrames array
-int g_ue_dsets_reserved[kNumBufferedFrames] = { 0 };
+int g_ue_complex_dsets_reserved[kNumBufferedFrames] = { 0 };
+int g_ue_gouraud_dsets_reserved[kNumBufferedFrames] = { 0 };
 std::vector<ComplexSurfaceDrawCall> g_draw_calls;
+//std::vector<GouraudSurfaceDrawCall> g_gouraud_draw_calls;
 
 // UEPerDrawCallUniformBuf 
 IRHIBuffer* g_ue_per_draw_call_uniforms[kNumBufferedFrames] = { 0 };
@@ -461,7 +526,7 @@ void ue_update_per_frame_uniforms(int idx, IRHIDevice* dev, DWORD DetailTexColor
 	det_color *= 1.0f/255.0f;
 	det_color = clamp(det_color, 0,1);
 	g_ue_per_frame_uniforms_ptr[idx]->DetailColor = det_color;
-	g_ue_per_frame_uniforms[idx]->Flush(dev, 0, sizeof(UEPerFrameUniformBuf));
+	g_ue_per_frame_uniforms[idx]->Flush(dev, 0, 0);
 }
 
 PipelineBlend select_blend(DWORD Flags) {
@@ -752,7 +817,7 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 
 	g_quad_vb_copy_event = device->CreateEvent();
 
-	RHIDescriptorSetLayoutDesc ue_dsl_desc[] = {
+	RHIDescriptorSetLayoutDesc ue_dsl_complex_desc[] = {
 		// diffuse
 		{RHIDescriptorType::kCombinedImageSampler, RHIShaderStageFlagBits::kFragment, 1, 0},
 		// lightmap
@@ -767,18 +832,33 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 		{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment | RHIShaderStageFlagBits::kVertex, 1, 5},
 	};
 
+	RHIDescriptorSetLayoutDesc ue_dsl_gouraud_desc[] = {
+		// diffuse
+		{RHIDescriptorType::kCombinedImageSampler, RHIShaderStageFlagBits::kFragment, 1, 0},
+		// per frame
+		{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment | RHIShaderStageFlagBits::kVertex, 1, 1},
+		// per draw call
+		{RHIDescriptorType::kUniformBuffer, RHIShaderStageFlagBits::kFragment | RHIShaderStageFlagBits::kVertex, 1, 2},
+	};
+
 	RHIDescriptorSetLayoutDesc ue_vs_dsl_desc[] = {
 		{RHIDescriptorType::kUniformBufferDynamic, RHIShaderStageFlagBits::kVertex, 1, 0}
 	};
-	g_ue_ds_layout = device->CreateDescriptorSetLayout(ue_dsl_desc, countof(ue_dsl_desc));
-	g_ue_vs_ub_ds_layout = device->CreateDescriptorSetLayout(ue_vs_dsl_desc, countof(ue_vs_dsl_desc));
+	g_ue_dsl_complex = device->CreateDescriptorSetLayout(ue_dsl_complex_desc, countof(ue_dsl_complex_desc));
+	g_ue_dsl_gouraud = device->CreateDescriptorSetLayout(ue_dsl_gouraud_desc, countof(ue_dsl_gouraud_desc));
+	g_ue_vs_ub_dsl = device->CreateDescriptorSetLayout(ue_vs_dsl_desc, countof(ue_vs_dsl_desc));
 
 	// create ue geometry buffers (one per swap chain len)
 	for (int i = 0; i < kNumBufferedFrames; ++i) {
-		g_ue_vb[i] = SBuffer::makeVB(device, gUENumVert* sizeof(UEVertexComplex), nullptr);
-		g_ue_vb_size[i] = 0;
-		g_ue_ib[i] = SBuffer::makeIB(device, gUENumIndices* sizeof(uint32_t), nullptr);
-		g_ue_ib_size[i] = 0;
+		g_ue_complex_vb[i] = SBuffer::makeVB(device, gUENumVert* sizeof(UEVertexComplex), nullptr);
+		g_ue_complex_vb_size[i] = 0;
+		g_ue_complex_ib[i] = SBuffer::makeIB(device, gUENumIndices* sizeof(uint32_t), nullptr);
+		g_ue_complex_ib_size[i] = 0;
+
+		g_ue_gouraud_vb[i] = SBuffer::makeVB(device, gUENumVert* sizeof(UEVertexGouraud), nullptr);
+		g_ue_gouraud_vb_size[i] = 0;
+		g_ue_gouraud_ib[i] = SBuffer::makeIB(device, gUENumIndices* sizeof(uint32_t), nullptr);
+		g_ue_gouraud_ib_size[i] = 0;
 
 
 		// TODO: check flags
@@ -809,7 +889,7 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 			// (like our dynamic descriptor)
 			g_ue_vs_ub[i] = SBuffer::makeUB(device, g_ue_vs_ub_num_el * g_ue_vs_ub_el_size, nullptr);
 			g_ue_vs_ub_size[i] = 0;
-			g_ue_vs_ub_ds[i] = device->AllocateDescriptorSet(g_ue_vs_ub_ds_layout);
+			g_ue_vs_ub_ds[i] = device->AllocateDescriptorSet(g_ue_vs_ub_dsl);
 
 			RHIDescriptorWriteDesc vs_ds_write_desc;
 			RHIDescriptorWriteDescBuilder builder(&vs_ds_write_desc, 1);
@@ -829,6 +909,11 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 
 	g_ue_complex_shader_alpha_test = SShader::load(device, "vulkandrv/complex-surface.vert.spv.bin",
 										"vulkandrv/complex-surface-atest.frag.spv.bin");
+
+	g_ue_gouraud_shader = SShader::load(device, "vulkandrv/gouraud-surface.vert.spv.bin",
+										"vulkandrv/gouraud-surface.frag.spv.bin");
+	g_ue_gouraud_shader_alpha_test = SShader::load(device, "vulkandrv/gouraud-surface.vert.spv.bin",
+										"vulkandrv/gouraud-surface-atest.frag.spv.bin");
 
 	RHIAttachmentDesc att_desc[2]; // color + depth
 	att_desc[0].format = device->GetSwapChainFormat();
@@ -994,11 +1079,17 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	world_model_vi_state.vertexAttributeDescCount = countof(world_model_va_desc);
 	world_model_vi_state.pVertexAttributeDesc = world_model_va_desc;
 
-	RHIVertexInputState ue_vi_state;
-	ue_vi_state.vertexBindingDescCount = countof(ue_complex_vert_bindings_desc);
-	ue_vi_state.pVertexBindingDesc = ue_complex_vert_bindings_desc;
-	ue_vi_state.vertexAttributeDescCount = countof(ue_complex_va_desc);
-	ue_vi_state.pVertexAttributeDesc = ue_complex_va_desc;
+	RHIVertexInputState ue_vi_complex_state;
+	ue_vi_complex_state.vertexBindingDescCount = countof(ue_complex_vert_bindings_desc);
+	ue_vi_complex_state.pVertexBindingDesc = ue_complex_vert_bindings_desc;
+	ue_vi_complex_state.vertexAttributeDescCount = countof(ue_complex_va_desc);
+	ue_vi_complex_state.pVertexAttributeDesc = ue_complex_va_desc;
+
+	RHIVertexInputState ue_vi_gouraud_state;
+	ue_vi_gouraud_state.vertexBindingDescCount = countof(ue_gouraud_vert_bindings_desc);
+	ue_vi_gouraud_state.pVertexBindingDesc = ue_gouraud_vert_bindings_desc;
+	ue_vi_gouraud_state.vertexAttributeDescCount = countof(ue_gouraud_va_desc);
+	ue_vi_gouraud_state.pVertexAttributeDesc = ue_gouraud_va_desc;
 
 	RHIInputAssemblyState tri_ia_state;
 	tri_ia_state.primitiveRestartEnable = false;
@@ -1156,8 +1247,13 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	IRHIPipelineLayout *pipeline_layout = device->CreatePipelineLayout(pipe_layout_desc, countof(pipe_layout_desc));
 	IRHIPipelineLayout *pipeline_layout_empty = device->CreatePipelineLayout(nullptr, 0);
 
-	const IRHIDescriptorSetLayout* ue_pipe_layout_desc[] = { g_ue_ds_layout, g_ue_vs_ub_ds_layout };
-	IRHIPipelineLayout *ue_pipeline_layout = device->CreatePipelineLayout(ue_pipe_layout_desc, countof(ue_pipe_layout_desc));
+	const IRHIDescriptorSetLayout* ue_complex_pipe_layout_desc[] = { g_ue_dsl_complex, g_ue_vs_ub_dsl};
+	IRHIPipelineLayout *ue_complex_pipeline_layout =
+		device->CreatePipelineLayout(ue_complex_pipe_layout_desc, countof(ue_complex_pipe_layout_desc));
+
+	const IRHIDescriptorSetLayout* ue_gouraud_pipe_layout_desc[] = { g_ue_dsl_gouraud };
+	IRHIPipelineLayout *ue_gouraud_pipeline_layout =
+		device->CreatePipelineLayout(ue_gouraud_pipe_layout_desc, countof(ue_gouraud_pipe_layout_desc));
 
 	g_tri_pipeline = device->CreateGraphicsPipeline(
 		tri_shader->stages_, countof(tri_shader->stages_), &tri_vi_state, &tri_ia_state,
@@ -1179,21 +1275,15 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 		&tris_ia_state, &viewport_state, &world_model_raster_state, &ms_state, &ds_state,
 		&no_blend_state, pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
 
-	g_ue_pipeline = device->CreateGraphicsPipeline(
-		g_ue_complex_shader->stages_, countof(g_ue_complex_shader->stages_), &ue_vi_state,
-		&ue_ia_state, &viewport_state, &ue_raster_state, &ms_state, &ds_state, &no_blend_state,
-		ue_pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
-
-
 	for (uint8_t j = 0; j < 2; j++) {
 		const RHIDepthStencilState* depth_state = j ? &ds_write_state : &ds_no_write_state;
 		for (uint8_t i = 0; i < kPipeBlendCount; i++) {
 			IRHIGraphicsPipeline* pipeline = device->CreateGraphicsPipeline(
-				g_ue_complex_shader->stages_, countof(g_ue_complex_shader->stages_), &ue_vi_state,
+				g_ue_complex_shader->stages_, countof(g_ue_complex_shader->stages_), &ue_vi_complex_state,
 				&ue_ia_state, &viewport_state, &ue_raster_state, &ms_state, depth_state, g_blend_states[i],
-				ue_pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
+				ue_complex_pipeline_layout, dyn_state, countof(dyn_state), g_main_pass);
 
-			uint32_t key = make_key((PipelineBlend)i, j!=0, false, false);
+			uint32_t key = make_key(kSurfaceShaderComplex, (PipelineBlend)i, j!=0, !"ALPHA_TEST");
 			assert(g_ue_pipelines.count(key) == 0);
 			g_ue_pipelines.insert(std::make_pair(key, pipeline));
 		}
@@ -1202,24 +1292,54 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	{
 		// yeah, we actually do depth write, but we need to have a separate flag for depth clear
 		// (which is a different pipeline meaning we overwrite everyting)
-		uint32_t clear_z_key = make_key(kPipeBlendNo, !"DEPTH_WRITE", !"ALPHA_TEST", "DEPTH_CLEAR");
+		uint32_t clear_z_key = make_key(kSurfaceShaderClearDepth, kPipeBlendNo, !"DEPTH_WRITE", !"ALPHA_TEST");
 		assert(g_ue_pipelines.count(clear_z_key) == 0);
 		g_ue_pipelines.insert(std::make_pair(clear_z_key, g_fs_clear_pipeline));
 	}
 
 	// alpha test
-	{
-		uint32_t alpha_test_key =
-			make_key(kPipeBlendNo, "DEPTH_WRITE", "ALPHA_TEST", !"DEPTH_CLEAR");
-		assert(g_ue_pipelines.count(alpha_test_key) == 0);
-		IRHIGraphicsPipeline *pipeline = device->CreateGraphicsPipeline(
-			g_ue_complex_shader_alpha_test->stages_,
-			countof(g_ue_complex_shader_alpha_test->stages_), &ue_vi_state, &ue_ia_state,
-			&viewport_state, &ue_raster_state, &ms_state, &ds_write_state,
-			g_blend_states[kPipeBlendNo], ue_pipeline_layout, dyn_state, countof(dyn_state),
-			g_main_pass);
-		g_ue_pipelines.insert(std::make_pair(alpha_test_key, pipeline));
+	// dim1
+	const SurfaceShader surface[] = { kSurfaceShaderComplex, kSurfaceShaderGouraud };
+	const SShader* const shaders[] = { g_ue_complex_shader_alpha_test, g_ue_gouraud_shader_alpha_test };
+	const RHIVertexInputState* const vi_states[] = { &ue_vi_complex_state, &ue_vi_gouraud_state};
+	const IRHIPipelineLayout * const layouts[] = { ue_complex_pipeline_layout, ue_gouraud_pipeline_layout };
+	// dim2
+	const PipelineBlend blends[] = { kPipeBlendNo, kPipeBlendTranslucent };
+	// dim3
+	const RHIDepthStencilState* depth_states[] = { &ds_write_state, &ds_no_write_state };
+	for (int d = 0; d < countof(depth_states); ++d) {
+		for (int i = 0; i < countof(surface); ++i) {
+			for (int b = 0; b < countof(blends); ++b) {
+				IRHIGraphicsPipeline *pipeline = device->CreateGraphicsPipeline(
+					shaders[i]->stages_, countof(shaders[i]->stages_), vi_states[i], &ue_ia_state,
+					&viewport_state, &ue_raster_state, &ms_state, depth_states[d],
+					g_blend_states[blends[b]], layouts[i], dyn_state, countof(dyn_state),
+					g_main_pass);
+
+				uint32_t alpha_test_key =
+					make_key(surface[i], blends[b], "DEPTH_WRITE" && d == 0, "ALPHA_TEST");
+				assert(g_ue_pipelines.count(alpha_test_key) == 0);
+				g_ue_pipelines.insert(std::make_pair(alpha_test_key, pipeline));
+			}
+		}
 	}
+
+	// create pipelines for gouraud surfaces
+	for (uint8_t j = 0; j < 2; j++) {
+		const RHIDepthStencilState *depth_state = j ? &ds_write_state : &ds_no_write_state;
+		for (uint8_t i = 0; i < kPipeBlendCount; i++) {
+			IRHIGraphicsPipeline *pipeline = device->CreateGraphicsPipeline(
+				g_ue_gouraud_shader->stages_, countof(g_ue_gouraud_shader->stages_),
+				&ue_vi_gouraud_state, &ue_ia_state, &viewport_state, &ue_raster_state, &ms_state,
+				depth_state, g_blend_states[i], ue_gouraud_pipeline_layout,
+				dyn_state, countof(dyn_state), g_main_pass);
+
+			uint32_t key = make_key(kSurfaceShaderGouraud, (PipelineBlend)i, j!=0, !"ALPHA TEST");
+			assert(g_ue_pipelines.count(key) == 0);
+			g_ue_pipelines.insert(std::make_pair(key, pipeline));
+		}
+	}
+
 	
 
 	if (!UVulkanRenderDevice::SetRes(NewX, NewY, NewColorBytes, Fullscreen)) {
@@ -1227,36 +1347,20 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 		return 0;
 	}
 
-#if 0	
-	textureCache= new (std::nothrow) TextureCache(D3D::getDevice());
-	if(!textureCache)
-	{
-		GError->Log(L"Error allocating texture cache.");
-		return 0;
-	}
-
-	texConverter = new (std::nothrow) TexConverter(textureCache);
-	if(!texConverter)
-	{
-		GError->Log(L"Error allocating texture converter.");
-		return 0;
-	}
-
-	shader_GouraudPolygon = static_cast<Shader_GouraudPolygon*>(D3D::getShader(D3D::SHADER_GOURAUDPOLYGON));
-	shader_Tile = static_cast<Shader_Tile*>(D3D::getShader(D3D::SHADER_TILE));
-	shader_ComplexSurface = static_cast<Shader_ComplexSurface*>(D3D::getShader(D3D::SHADER_COMPLEXSURFACE));
-	shader_FogSurface = static_cast<Shader_FogSurface*>(D3D::getShader(D3D::SHADER_FOGSURFACE));
-
+#if 0
 	//Brightness
 	float brightness;
 	GConfig->GetFloat(L"WinDrv.WindowsClient",L"Brightness",brightness);
 	D3D::setBrightness(brightness);
-
 #endif
+
 	URenderDevice::PrecacheOnFlip = 1; //Turned on to immediately recache on init (prevents lack of textures after fullscreen switch)
 
 	QueryPerformanceFrequency(&perfCounterFreq); //Init performance counter frequency.
-	
+
+	m_useZRangeHack = false;
+	m_nearZRangeHackProjectionActive = false;
+
 	return 1;
 }
 
@@ -1297,8 +1401,10 @@ UBOOL UVulkanRenderDevice::SetRes(INT NewX, INT NewY, INT NewColorBytes, UBOOL F
 void UVulkanRenderDevice::Exit()
 {
 	for (int i = 0; i < kNumBufferedFrames; ++i) {
-		g_ue_dsets[i].clear();
-		g_ue_dsets_reserved[i] = 0;
+		g_ue_complex_dsets[i].clear();
+		g_ue_complex_dsets_reserved[i] = 0;
+		g_ue_gouraud_dsets[i].clear();
+		g_ue_gouraud_dsets_reserved[i] = 0;
 	};
 
 	g_tex_upload_tasks.clear();
@@ -1309,6 +1415,7 @@ void UVulkanRenderDevice::Exit()
 	delete g_vulkan_device;
 	g_ue_pipelines.clear();
 	assert(g_draw_calls.size() == 0);
+	//assert(g_gouraud_draw_calls.size() == 0);
 	vulkan_finalize();
 }
 
@@ -1351,11 +1458,14 @@ Depending on the values of the related parameters (see source code) this should 
 EndFlash() ends this, but other renderers actually save the parameters and start drawing it there so it gets blended with the final scene.
 \note RenderLockFlags aren't always properly set, this results in for example glitching in the Unreal castle flyover, in the wall of the tower with the Nali on it.
 */
-
+int g_idx = 0;
 int sanity_lock_cnt = 0;
 void UVulkanRenderDevice::Lock(FPlane FlashScale, FPlane FlashFog, FPlane ScreenClear, DWORD RenderLockFlags, BYTE* HitData, INT* HitSize)
 {
+	g_idx = 0;
 	assert(0 == sanity_lock_cnt);
+
+	log_info("Lock\n");
 
 	float deltaTime;
 	static LARGE_INTEGER oldTime;
@@ -1496,12 +1606,23 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 	auto it = std::remove_if(b, e, [dev](const TextureUploadTask* t) { return t == nullptr; });
 	g_tex_upload_in_progress.erase(it, e);
 
+	if (!g_draw_calls.empty() /*|| !g_gouraud_draw_calls.empty()*/) {
+		ue_update_per_frame_uniforms(g_curFBIdx, dev, m_detailTextureColor4ub);
+	}
+
 	if (!g_draw_calls.empty()) {
 		// TODO: do not copy whole array! only actual filled frame data 
-		g_ue_vb[g_curFBIdx]->CopyToGPU(dev, cb);
-		g_ue_ib[g_curFBIdx]->CopyToGPU(dev, cb);
+		g_ue_complex_vb[g_curFBIdx]->CopyToGPU(dev, cb);
+		g_ue_complex_ib[g_curFBIdx]->CopyToGPU(dev, cb);
 		g_ue_vs_ub[g_curFBIdx]->CopyToGPU(dev, cb);
-		ue_update_per_frame_uniforms(g_curFBIdx, dev, m_detailTextureColor4ub);
+	}
+
+	//if (!g_gouraud_draw_calls.empty()) {
+	if(g_ue_gouraud_ib_size[g_curFBIdx])
+	{
+		// TODO: do not copy whole array! only actual filled frame data 
+		g_ue_gouraud_vb[g_curFBIdx]->CopyToGPU(dev, cb);
+		g_ue_gouraud_ib[g_curFBIdx]->CopyToGPU(dev, cb);
 	}
 
 	//cb->Barrier_PresentToClear(fb_image);
@@ -1516,9 +1637,10 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 	cb->BeginRenderPass(g_main_pass, cur_fb, &render_area, clear_values, (uint32_t)countof(clear_values));
 
 	RHIViewport viewport;
-	viewport.x = viewport.y = 0;
-	viewport.width = (float)fb_image->Width();
-	viewport.height = (float)fb_image->Height();
+	viewport.x = FrameXB;
+	viewport.y = FrameYB;
+	viewport.width = FrameX;
+	viewport.height = FrameY;
 	viewport.minDepth = 0.0f;
 	viewport.maxDepth = 1.0f;
 
@@ -1559,22 +1681,32 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 	}
 
 	if (!g_draw_calls.empty()) {
-		cb->BindIndexBuffer(g_ue_ib[g_curFBIdx]->device_buf_, 0, RHIIndexType::kUint32);
-		cb->BindVertexBuffers(&g_ue_vb[g_curFBIdx]->device_buf_, 0, 1);
+
 
 		const int num_draw_calls = (int)g_draw_calls.size();
 		for (int i = 0; i < num_draw_calls; i++) {
 			const ComplexSurfaceDrawCall& dc = g_draw_calls[i];
 
 			//TODO: make this key where we fill drawcall struct?
-			uint32_t key = make_key(dc.pipeline_blend, dc.b_depth_write, dc.b_alpha_test, dc.b_depth_clear);
+			uint32_t key = make_key(dc.surface_shader, dc.pipeline_blend, dc.b_depth_write, dc.b_alpha_test);
 			assert(g_ue_pipelines.count(key));
 			IRHIGraphicsPipeline* pipeline = g_ue_pipelines[key];
 			cb->BindPipeline(RHIPipelineBindPoint::kGraphics, pipeline);
 			cb->SetViewport(&viewport, 1);
 
 			if (dc.dset) {
-				RHIDescriptorWriteDesc desc_write_desc[4];
+
+				const bool is_complex = dc.surface_shader == kSurfaceShaderComplex;
+
+				if(is_complex) {
+					cb->BindIndexBuffer(g_ue_complex_ib[g_curFBIdx]->device_buf_, 0, RHIIndexType::kUint32);
+					cb->BindVertexBuffers(&g_ue_complex_vb[g_curFBIdx]->device_buf_, 0, 1);
+				} else {
+					cb->BindIndexBuffer(g_ue_gouraud_ib[g_curFBIdx]->device_buf_, 0, RHIIndexType::kUint32);
+					cb->BindVertexBuffers(&g_ue_gouraud_vb[g_curFBIdx]->device_buf_, 0, 1);
+				}
+
+				RHIDescriptorWriteDesc desc_write_desc[5];
 				RHIDescriptorWriteDescBuilder builder(desc_write_desc, countof(desc_write_desc));
 				// TODO: move g_ue_per_frame_uniforms out of "for" loop
 				builder.add(g_draw_calls[i].dset, 0, g_test_sampler,
@@ -1582,23 +1714,30 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 				if (dc.lightmap) {
 					builder.add(g_draw_calls[i].dset, 1, g_test_sampler,
 								RHIImageLayout::kShaderReadOnlyOptimal, dc.lightmap);
-				}
+				} 
 				if (dc.detail) {
 					builder.add(g_draw_calls[i].dset, 2, g_test_sampler,
 								RHIImageLayout::kShaderReadOnlyOptimal, dc.detail);
-				}
+				} 
 				if (dc.macro) {
 					builder.add(g_draw_calls[i].dset, 3, g_test_sampler,
 								RHIImageLayout::kShaderReadOnlyOptimal, dc.detail);
-				}
-				builder.add(g_draw_calls[i].dset, 4, g_ue_per_frame_uniforms[g_curFBIdx], 0,
+				} 
+
+				// TODO: have a separate set for this to not setup per draw call
+				builder.add(g_draw_calls[i].dset, is_complex ? 4 : 1, g_ue_per_frame_uniforms[g_curFBIdx], 0,
 							sizeof(UEPerFrameUniformBuf));
 				dev->UpdateDescriptorSet(desc_write_desc, builder.cur_index);
 
-				const IRHIDescriptorSet *sets[] = {dc.dset, g_ue_vs_ub_ds[g_curFBIdx] };
-				uint32_t dyn_offsets[] = {dc.vs_ub_idx*g_ue_vs_ub_el_size}; 
-				cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, pipeline->Layout(), sets,
-									   countof(sets), countof(dyn_offsets), dyn_offsets);
+				if (is_complex) {
+					const IRHIDescriptorSet *sets[] = {dc.dset, g_ue_vs_ub_ds[g_curFBIdx]};
+					uint32_t dyn_offsets[] = {dc.vs_ub_idx * g_ue_vs_ub_el_size};
+					cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, pipeline->Layout(),
+										   sets, countof(sets), countof(dyn_offsets), dyn_offsets);
+				} else {
+					cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, pipeline->Layout(),
+										   &dc.dset, 1, 0, nullptr);
+				}
 			}
 
 			if (dc.num_indices) {
@@ -1608,6 +1747,45 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 			}
 		}
 	}
+#if 0
+	if (!g_gouraud_draw_calls.empty()) {
+		cb->BindIndexBuffer(g_ue_gouraud_ib[g_curFBIdx]->device_buf_, 0, RHIIndexType::kUint32);
+		cb->BindVertexBuffers(&g_ue_gouraud_vb[g_curFBIdx]->device_buf_, 0, 1);
+
+		const int num_draw_calls = (int)g_gouraud_draw_calls.size();
+		for (int i = 0; i < num_draw_calls; i++) {
+			const GouraudSurfaceDrawCall& dc = g_gouraud_draw_calls[i];
+
+			//TODO: make this key where we fill drawcall struct?
+			// TODO: only one pipeline for gouraud, maybe not store it in a map (even if we will have wireframe)
+			uint32_t key = make_key(kSurfaceShaderGouraud, kPipeBlendNo, true, false, false);
+			assert(g_ue_pipelines.count(key));
+			IRHIGraphicsPipeline* pipeline = g_ue_pipelines[key];
+			cb->BindPipeline(RHIPipelineBindPoint::kGraphics, pipeline);
+			cb->SetViewport(&viewport, 1);
+
+			if (dc.dset) {
+				RHIDescriptorWriteDesc desc_write_desc[4];
+				RHIDescriptorWriteDescBuilder builder(desc_write_desc, countof(desc_write_desc));
+				// TODO: move g_ue_per_frame_uniforms out of "for" loop
+				builder.add(g_gouraud_draw_calls[i].dset, 0, g_test_sampler,
+							RHIImageLayout::kShaderReadOnlyOptimal, dc.diffuse);
+				builder.add(g_gouraud_draw_calls[i].dset, 1, g_ue_per_frame_uniforms[g_curFBIdx], 0,
+							sizeof(UEPerFrameUniformBuf));
+				dev->UpdateDescriptorSet(desc_write_desc, builder.cur_index);
+
+				cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, pipeline->Layout(), &dc.dset,
+									   1, 0, nullptr);
+			}
+
+			if (dc.num_indices) {
+				cb->DrawIndexed(dc.num_indices, 1, dc.ib_offset, 0, 0);
+			} else {
+				cb->Draw(dc.num_vertices, 1, dc.ib_offset, 0);
+			}
+		}
+	}
+#endif
 
 	cb->EndRenderPass(g_main_pass, cur_fb);
 	cb->End();
@@ -1623,11 +1801,16 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 		log_error("EndFrame failed\n");
 	}
 
-	g_ue_vb_size[g_curFBIdx] = 0;
-	g_ue_ib_size[g_curFBIdx] = 0;
+	g_ue_complex_vb_size[g_curFBIdx] = 0;
+	g_ue_complex_ib_size[g_curFBIdx] = 0;
+	g_ue_complex_dsets_reserved[g_curFBIdx] = 0;
 	g_ue_vs_ub_size[g_curFBIdx] = 0;
-	g_ue_dsets_reserved[g_curFBIdx] = 0;
 	g_draw_calls.resize(0);
+
+	g_ue_gouraud_vb_size[g_curFBIdx] = 0;
+	g_ue_gouraud_ib_size[g_curFBIdx] = 0;
+	g_ue_gouraud_dsets_reserved[g_curFBIdx] = 0;
+	//g_gouraud_draw_calls.resize(0);
 
 	sanity_lock_cnt--;
 }
@@ -1650,7 +1833,7 @@ const IRHIImageView* GetCachedTexture(struct FTextureInfo *Texture, unsigned lon
 		//Mask bit changed. Static texture, so must be deleted and recreated.
 		else if (!b_detail && (PolyFlags & PF_Masked) != 0 && !g_texCache->isMasked(Texture->CacheID))
 		{
-			assert(!"Handle this");
+			//assert(!"Handle this");
 			//delete & recache
 		}
 			
@@ -1734,8 +1917,8 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 
 	uint32_t Flags = Surface.PolyFlags;
 
-	uint32_t& cur_vb_idx = g_ue_vb_size[g_curFBIdx];
-	uint32_t& cur_ib_idx = g_ue_ib_size[g_curFBIdx];
+	uint32_t& cur_vb_idx = g_ue_complex_vb_size[g_curFBIdx];
+	uint32_t& cur_ib_idx = g_ue_complex_ib_size[g_curFBIdx];
 
 	uint32_t& cur_vs_data_idx = g_ue_vs_ub_size[g_curFBIdx];
 	
@@ -1802,8 +1985,8 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 			continue;
 		}
 
-		UEVertexComplex* VB = (UEVertexComplex*)g_ue_vb[g_curFBIdx]->getMappedPtr();
-		uint32_t* IB = (uint32_t*)g_ue_ib[g_curFBIdx]->getMappedPtr();
+		UEVertexComplex* VB = (UEVertexComplex*)g_ue_complex_vb[g_curFBIdx]->getMappedPtr();
+		uint32_t* IB = (uint32_t*)g_ue_complex_ib[g_curFBIdx]->getMappedPtr();
 
 		const int32_t num_verts = Poly->NumPts;
 		const int32_t num_indices_for_poly_fan = (num_verts - 2) * 3;
@@ -1848,7 +2031,7 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 		ComplexSurfaceDrawCall dc;
 		dc.pipeline_blend = select_blend(Flags);
 		dc.b_depth_write = select_depth_write(Flags);
-		dc.b_depth_clear = 0;
+		//dc.b_depth_clear = 0;
 		// TODO: if masked we should use DepthEqual because triangles are drawn on top of something
 		// which has been already drawn (see D3D9 renderer)
 		dc.b_alpha_test = Flags & PF_Masked;
@@ -1857,6 +2040,10 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 		assert((!dc.b_alpha_test && kPipeBlendNo == dc.pipeline_blend) ||
 			   (dc.b_alpha_test ^ (!!dc.pipeline_blend)));
 
+		if(dc.b_alpha_test && kPipeBlendNo != dc.pipeline_blend) {
+			log_info("alpha test + alpha blend");
+		}
+		dc.surface_shader = kSurfaceShaderComplex;
 		dc.vb_offset = vb_offset;
 		dc.num_vertices = cur_vb_idx - vb_offset;
 		dc.ib_offset = ib_offset;
@@ -1871,25 +2058,310 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 		dc.detail = rhi_detail ? rhi_detail : rhi_fog;
 		dc.macro = rhi_macro;
 		// TODO: rework this to a simple free list of dsets
-		if (g_ue_dsets[g_curFBIdx].size() == (size_t)g_ue_dsets_reserved[g_curFBIdx]) {
-			g_ue_dsets[g_curFBIdx].push_back(
-				g_vulkan_device->AllocateDescriptorSet(g_ue_ds_layout));
+		if (g_ue_complex_dsets[g_curFBIdx].size() == (size_t)g_ue_complex_dsets_reserved[g_curFBIdx]) {
+			g_ue_complex_dsets[g_curFBIdx].push_back(
+				g_vulkan_device->AllocateDescriptorSet(g_ue_dsl_complex));
 		}
-		dc.dset = g_ue_dsets[g_curFBIdx][g_ue_dsets_reserved[g_curFBIdx]];
-		g_ue_dsets_reserved[g_curFBIdx]++;
+		dc.dset = g_ue_complex_dsets[g_curFBIdx][g_ue_complex_dsets_reserved[g_curFBIdx]];
+		g_ue_complex_dsets_reserved[g_curFBIdx]++;
 		g_draw_calls.emplace_back(dc);
 
 	//	log_info("i: %d flags: %x depth write: %d\n", idx, Flags, dc.b_depth_write);
+		//log_info("Complex\n");
+	}
+}
+
+/**
+Gouraud shaded polygons are used for 3D models and surprisingly decals and shadows. 
+They are sent with a call of this function per triangle fan, worldview transformed and lit. They do have normals and texture coordinates (no panning).
+\param Frame The scene. See SetSceneNode().
+\param Info The texture for the model. Models only come with diffuse textures.
+\param Pts A triangle fan stored as an array. Each element has a normal, light (i.e. color) and fog (color due to being in fog).
+\param NumPts Number of verts in fan.
+\param PolyFlags Contains the correct flags for this model. See polyflags.h
+\param Span Probably for software renderers.
+
+\note Modulated models (i.e. shadows) shouldn't have a color, and fog should only be applied to models with the correct flags for that. The D3D10 renderer handles this in the shader.
+\note Check if submitted polygons are valid (3 or more points).
+*/
+
+void UVulkanRenderDevice::DrawGouraudPolygon(FSceneNode *Frame, FTextureInfo &Info,
+											 FTransTexture **Pts, int NumPts, DWORD PolyFlags,
+											 FSpanBuffer *Span) {
+
+	if (NumPts < 3) {
+		log_info("Invalid polygon");
+		return;
+	}
+
+	const IRHIImageView *rhi_diffuse = GetCachedTexture(&Info, PolyFlags, g_vulkan_device, false);
+
+	const BYTE NoFlags = 0;
+	const BYTE ColorFlags = 1;
+	const BYTE FogFlags = 2;
+	BYTE requestedColorFlags = NoFlags;
+
+	// Check if should render fog and if vertex specular is supported
+	// Also set other color flags
+	if (PolyFlags & PF_Modulated) {
+		requestedColorFlags = 0;
+	} else {
+		requestedColorFlags = ColorFlags;
+#ifdef UTGLR_RUNE_BUILD
+			if (((PolyFlags & (PF_RenderFog | PF_Translucent | PF_Modulated | PF_AlphaBlend)) == PF_RenderFog)/* && UseVertexSpecular*/) {
+#else
+			if (((PolyFlags & (PF_RenderFog | PF_Translucent | PF_Modulated)) == PF_RenderFog) /*&& UseVertexSpecular*/) {
+#endif
+				requestedColorFlags = ColorFlags | FogFlags;
+			}
+	}
+
+	// If not drawing fog, disable the PF_RenderFog flag
+	if (!(requestedColorFlags & FogFlags)) {
+		PolyFlags &= ~PF_RenderFog;
+	}
+
+	if (!(PolyFlags & (PF_Translucent | PF_Modulated |
+					   PF_Highlighted))) // If none of these flags, occlude (opengl renderer)
+	{
+		PolyFlags |= PF_Occlude;
+	} else if (PolyFlags & PF_Translucent) {
+		PolyFlags &= ~PF_Masked;
 	}
 
 
-}
+	const float UMult = 1.0f / (Info.UScale * Info.USize);
+	const float VMult = 1.0f / (Info.VScale * Info.VSize);
 
-void UVulkanRenderDevice::DrawGouraudPolygon(FSceneNode* Frame, FTextureInfo& Info, FTransTexture** Pts, int NumPts, DWORD PolyFlags, FSpanBuffer* Span)
-{
+	uint32_t& cur_vb_idx = g_ue_gouraud_vb_size[g_curFBIdx];
+	uint32_t& cur_ib_idx = g_ue_gouraud_ib_size[g_curFBIdx];
+	const uint32_t vb_offset = cur_vb_idx;
+	const uint32_t ib_offset = cur_ib_idx;
+
+	UEVertexGouraud* VB = (UEVertexGouraud*)g_ue_gouraud_vb[g_curFBIdx]->getMappedPtr();
+	uint32_t* IB = (uint32_t*)g_ue_gouraud_ib[g_curFBIdx]->getMappedPtr();
+
+	const int32_t num_verts = NumPts;
+	const int32_t num_indices_for_poly_fan = (num_verts - 2) * 3;
+
+	assert(cur_ib_idx + num_indices_for_poly_fan < gUENumIndices);
+	assert(cur_vb_idx + NumPts < gUENumVert);
+
+	// Generate fan indices
+	for (int i = 1; i < num_verts - 1; i++) {
+		IB[cur_ib_idx++] = cur_vb_idx; // Center point
+		IB[cur_ib_idx++] = cur_vb_idx + i;
+		IB[cur_ib_idx++] = cur_vb_idx + i + 1;
+	}
+
+	// Generate fan vertices
+	for (INT i = 0; i < num_verts; i++) {
+		UEVertexGouraud* v = VB + cur_vb_idx++;
+		v->Pos = *(vec3 *)&Pts[i]->Point.X; // Position
+		v->TexCoord.x = Pts[i]->U * UMult;
+		v->TexCoord.y = Pts[i]->V * VMult;
+		v->TexCoord.z = (float)g_idx;
+		
+		if(requestedColorFlags & FogFlags) {
+			FLOAT f255_Times_One_Minus_FogW = 255.0f * (1.0f - Pts[i]->Fog.W);
+			v->Color = FPlaneTo_BGRScaled_A255(&Pts[i]->Light, f255_Times_One_Minus_FogW);
+			v->FogColor = FPlaneTo_BGR_A0(&Pts[i]->Fog);
+		} else if(requestedColorFlags & ColorFlags) {
+			v->Color = FPlaneTo_BGR_A0(&Pts[i]->Light);
+			v->FogColor = 0;
+		} else {
+			v->Color = 0xFFFFFFFF;
+			v->FogColor = 0;
+		}
+	}
+
+	ComplexSurfaceDrawCall dc;
+	dc.pipeline_blend = select_blend(PolyFlags);
+	dc.b_depth_write = select_depth_write(PolyFlags);
+	//dc.b_depth_clear = 0;
+	// TODO: if masked we should use DepthEqual because triangles are drawn on top of something
+	// which has been already drawn (see D3D9 renderer)
+	dc.b_alpha_test = PolyFlags & PF_Masked;
+
+	// either alpha test or blend
+	assert((!dc.b_alpha_test && kPipeBlendNo == dc.pipeline_blend) ||
+		   (dc.b_alpha_test ^ (!!dc.pipeline_blend)));
+
+	dc.surface_shader = kSurfaceShaderGouraud;
+	dc.vb_offset = vb_offset;
+	dc.num_vertices = cur_vb_idx - vb_offset;
+	dc.ib_offset = ib_offset;
+	dc.num_indices = cur_ib_idx - ib_offset;
+	dc.diffuse = rhi_diffuse;
+	dc.detail = nullptr;
+	dc.lightmap = nullptr;
+	dc.macro = nullptr;
+	dc.vs_ub_idx = 0xFFFFFFFF;
+	// TODO: rework this to a simple free list of dsets
+	if (g_ue_gouraud_dsets[g_curFBIdx].size() == (size_t)g_ue_gouraud_dsets_reserved[g_curFBIdx]) {
+		g_ue_gouraud_dsets[g_curFBIdx].push_back(
+			g_vulkan_device->AllocateDescriptorSet(g_ue_dsl_gouraud));
+	}
+	dc.dset = g_ue_gouraud_dsets[g_curFBIdx][g_ue_gouraud_dsets_reserved[g_curFBIdx]];
+	g_ue_gouraud_dsets_reserved[g_curFBIdx]++;
+	//g_gouraud_draw_calls.emplace_back(dc);
+	g_draw_calls.emplace_back(dc);
+
+	//log_info("i: %d flags: %x depth write: %d pipe_bled: %d \n", g_idx, PolyFlags, dc.b_depth_write, dc.pipeline_blend);
+	g_idx++;
+
 }
-void UVulkanRenderDevice::DrawTile(FSceneNode* Frame, FTextureInfo& Info, FLOAT X, FLOAT Y, FLOAT XL, FLOAT YL, FLOAT U, FLOAT V, FLOAT UL, FLOAT VL, class FSpanBuffer* Span, FLOAT Z, FPlane Color, FPlane Fog, DWORD PolyFlags)
-{
+void UVulkanRenderDevice::DrawTile(FSceneNode *Frame, FTextureInfo &Info, FLOAT X, FLOAT Y,
+								   FLOAT XL, FLOAT YL, FLOAT U, FLOAT V, FLOAT UL, FLOAT VL,
+								   class FSpanBuffer *Span, FLOAT Z, FPlane Color, FPlane Fog,
+								   DWORD PolyFlags) {
+	FLOAT PX1 = X - Frame->FX2;
+	FLOAT PX2 = PX1 + XL;
+	FLOAT PY1 = Y - Frame->FY2;
+	FLOAT PY2 = PY1 + YL;
+
+	//FLOAT One_Over_FX = 1.0f / Frame->FX;
+	float RFX2 = m_RFX2;
+	float RFY2 = m_RFY2;
+
+	FLOAT RPX1 = RFX2 * PX1;
+	FLOAT RPX2 = RFX2 * PX2;
+	FLOAT RPY1 = RFY2 * PY1;
+	FLOAT RPY2 = RFY2 * PY2;
+	if (!Frame->Viewport->IsOrtho()) {
+		RPX1 *= Z;
+		RPX2 *= Z;
+		RPY1 *= Z;
+		RPY2 *= Z;
+	}
+
+	const IRHIImageView *rhi_diffuse = GetCachedTexture(&Info, PolyFlags, g_vulkan_device, false);
+
+#ifdef UTGLR_RUNE_BUILD
+	if (Info.Palette && Info.Palette[128].A != 255 &&
+		!(PolyFlags & (PF_Translucent | PF_AlphaBlend))) {
+#else
+	if (Info.Palette && Info.Palette[128].A != 255 && !(PolyFlags & PF_Translucent)) {
+#endif
+		PolyFlags |= PF_Highlighted | PF_Occlude;
+	}
+
+	DWORD tileColor;
+	tileColor = 0xFFFFFFFF;
+#ifdef UTGLR_RUNE_BUILD
+	if (PolyFlags & PF_AlphaBlend) {
+		Color.W = Info.Texture->Alpha;
+		tileColor = FPlaneTo_BGRAClamped(&Color);
+	} else {
+		tileColor = FPlaneTo_BGRClamped_A255(&Color);
+	}
+#else
+	tileColor = FPlaneTo_BGRClamped_A255(&Color);
+#endif
+
+	FLOAT TexInfoUMult = 1.0f / (Info.UScale * Info.USize);
+	FLOAT TexInfoVMult = 1.0f / (Info.VScale * Info.VSize);
+
+	FLOAT SU1 = (U) * TexInfoUMult;
+	FLOAT SU2 = (U + UL) * TexInfoUMult;
+	FLOAT SV1 = (V) * TexInfoVMult;
+	FLOAT SV2 = (V + VL) * TexInfoVMult;
+
+	uint32_t& cur_vb_idx = g_ue_gouraud_vb_size[g_curFBIdx];
+	uint32_t& cur_ib_idx = g_ue_gouraud_ib_size[g_curFBIdx];
+	const uint32_t vb_offset = cur_vb_idx;
+	const uint32_t ib_offset = cur_ib_idx;
+
+	// TODO: can use special quad shader which will calculate texcoords from vertex_id % 4
+	UEVertexGouraud* VB = (UEVertexGouraud*)g_ue_gouraud_vb[g_curFBIdx]->getMappedPtr();
+	uint32_t* IB = (uint32_t*)g_ue_gouraud_ib[g_curFBIdx]->getMappedPtr();
+
+	const int32_t num_verts = 4;
+	const int32_t num_indices_for_poly_fan = (num_verts - 2) * 3;
+
+	assert(cur_ib_idx + num_indices_for_poly_fan < gUENumIndices);
+	assert(cur_vb_idx + num_verts < gUENumVert);
+
+	// Generate fan indices
+	for (int i = 1; i < num_verts - 1; i++) {
+		IB[cur_ib_idx++] = cur_vb_idx; // Center point
+		IB[cur_ib_idx++] = cur_vb_idx + i;
+		IB[cur_ib_idx++] = cur_vb_idx + i + 1;
+	}
+
+	// Generate fan vertices
+	{
+		UEVertexGouraud* v0 = VB + cur_vb_idx++;
+		UEVertexGouraud* v1 = VB + cur_vb_idx++;
+		UEVertexGouraud* v2 = VB + cur_vb_idx++;
+		UEVertexGouraud* v3 = VB + cur_vb_idx++;
+
+		v0->TexCoord.x = SU1;
+		v0->TexCoord.y = SV1;
+
+		v1->TexCoord.x = SU2;
+		v1->TexCoord.y = SV1;
+
+		v2->TexCoord.x = SU2;
+		v2->TexCoord.y = SV2;
+
+		v3->TexCoord.x = SU1;
+		v3->TexCoord.y = SV2;
+
+		v0->Pos.x = RPX1;
+		v0->Pos.y = RPY1;
+		v0->Pos.z = Z;
+		v0->Color = tileColor;
+		v0->FogColor = 0;
+
+		v1->Pos.x = RPX2;
+		v1->Pos.y = RPY1;
+		v1->Pos.z = Z;
+		v1->Color = tileColor;
+		v1->FogColor = 0;
+
+		v2->Pos.x = RPX2;
+		v2->Pos.y = RPY2;
+		v2->Pos.z = Z;
+		v2->Color = tileColor;
+		v2->FogColor = 0;
+
+		v3->Pos.x = RPX1;
+		v3->Pos.y = RPY2;
+		v3->Pos.z = Z;
+		v3->Color = tileColor;
+		v3->FogColor = 0;
+	}
+
+	ComplexSurfaceDrawCall dc;
+	dc.pipeline_blend = select_blend(PolyFlags);
+	dc.b_depth_write = select_depth_write(PolyFlags);
+	//dc.b_depth_clear = 0;
+	// TODO: if masked we should use DepthEqual because triangles are drawn on top of something
+	// which has been already drawn (see D3D9 renderer)
+	dc.b_alpha_test = PolyFlags & PF_Masked;
+	dc.surface_shader = kSurfaceShaderGouraud;
+	dc.vb_offset = vb_offset;
+	dc.num_vertices = cur_vb_idx - vb_offset;
+	dc.ib_offset = ib_offset;
+	dc.num_indices = cur_ib_idx - ib_offset;
+	dc.diffuse = rhi_diffuse;
+	dc.detail = nullptr;
+	dc.lightmap = nullptr;
+	dc.macro = nullptr;
+	dc.vs_ub_idx = 0xFFFFFFFF;
+	// TODO: rework this to a simple free list of dsets
+	if (g_ue_gouraud_dsets[g_curFBIdx].size() == (size_t)g_ue_gouraud_dsets_reserved[g_curFBIdx]) {
+		g_ue_gouraud_dsets[g_curFBIdx].push_back(
+			g_vulkan_device->AllocateDescriptorSet(g_ue_dsl_gouraud));
+	}
+	dc.dset = g_ue_gouraud_dsets[g_curFBIdx][g_ue_gouraud_dsets_reserved[g_curFBIdx]];
+	g_ue_gouraud_dsets_reserved[g_curFBIdx]++;
+	//g_gouraud_draw_calls.emplace_back(dc);
+	g_draw_calls.emplace_back(dc);
+
+	//log_info("DrawTile");
+
 }
 void UVulkanRenderDevice::Draw2DLine(FSceneNode* Frame, FPlane Color, DWORD LineFlags, FVector P1, FVector P2)
 {
@@ -1902,8 +2374,9 @@ void UVulkanRenderDevice::ClearZ(FSceneNode* Frame)
 	ComplexSurfaceDrawCall dc;
 	dc.pipeline_blend = kPipeBlendNo;
 	dc.b_depth_write = 0;
-	dc.b_depth_clear = true;
+	//dc.b_depth_clear = true;
 	dc.b_alpha_test = false;
+	dc.surface_shader = kSurfaceShaderClearDepth;
 
 	dc.vb_offset = 0;
 	dc.num_vertices = 6;
@@ -1916,7 +2389,7 @@ void UVulkanRenderDevice::ClearZ(FSceneNode* Frame)
 	dc.dset = nullptr;
 	g_draw_calls.emplace_back(dc);
 
-	//log_info("ClearZ");
+	log_info("ClearZ");
 }
 void UVulkanRenderDevice::PushHit(const BYTE* Data, INT Count)
 {
@@ -1974,11 +2447,31 @@ This optional function can be used to set the frustum and viewport parameters pe
 void UVulkanRenderDevice::SetSceneNode(FSceneNode* Frame)
 {
 	//Calculate projection parameters 
-	float aspect = Frame->FY/Frame->FX;
-	float RProjZ = appTan(Viewport->Actor->FovAngle * PI/360.0 );
+	FLOAT One_Over_FX = 1.0f / Frame->FX;
+	m_Aspect = Frame->FY*One_Over_FX;
+	m_Fov = Viewport->Actor->FovAngle * PI / 180.0f;
+	m_RProjZ = appTan(m_Fov/2.0f);
 
-	float fov = Viewport->Actor->FovAngle * PI / 180.0f;
-	g_current_projection = perspectiveMatrixX(fov, Frame->FX, Frame->FY, zNear, zFar, false);
+	g_current_projection = perspectiveMatrixX(m_Fov, Frame->FX, Frame->FY, zNear, zFar, false);
+	FrameX = (float)Frame->X;
+	FrameY = (float)Frame->Y;
+	FrameFX = (float)Frame->FX;
+	FrameFY = (float)Frame->FY;
+	FrameXB = (float)Frame->XB;
+	FrameYB = (float)Frame->YB;
+	m_RFX2 = 2.0f * m_RProjZ * One_Over_FX;
+	m_RFY2 = 2.0f * m_RProjZ * One_Over_FX;
+
+	log_info("SetSceneNode: FX:%f FY:%f X:%d Y:%d XB:%d YB:%d zNear: %f zFar: %f Fov: %f\n", Frame->FX, Frame->FY,
+			 Frame->X, Frame->Y, Frame->XB, Frame->YB, zNear, zFar, Viewport->Actor->FovAngle);
+#if 1
+	if (Frame->Viewport->IsOrtho()) {
+		SetOrthoProjection();
+	} else {
+		SetProjection(false);
+	}
+	#endif
+
 
 	// Viewport is set here as it changes during gameplay. For example in DX conversations
  	//D3D::setViewPort(Frame->X,Frame->Y,Frame->XB,Frame->YB); 
@@ -2045,4 +2538,106 @@ void UVulkanRenderDevice::OnSwapChainRecreated(void* user_ptr) {
 		fb_desc.layers_ = 1;
 		g_main_fb[i] = dev->CreateFrameBuffer(&fb_desc, g_main_pass);
 	}
+}
+
+void UVulkanRenderDevice::SetProjection(bool requestNearZRangeHackProjection) {
+	float left, right, bottom, top, zNear, zFar;
+	float invRightMinusLeft, invTopMinusBottom, invNearMinusFar;
+
+	//Save new Z range hack projection state
+	m_nearZRangeHackProjectionActive = requestNearZRangeHackProjection;
+
+	//Set default zNearVal
+	FLOAT zNearVal = 0.5f;
+
+	FLOAT zScaleVal = 1.0f;
+	if (requestNearZRangeHackProjection) {
+		zScaleVal = 0.125f;
+		zNearVal = 0.5;
+	}
+	else {
+		if (m_useZRangeHack) {
+			zNearVal = 4.0f;
+		}
+	}
+
+	left = -m_RProjZ * zNearVal;
+	right = +m_RProjZ * zNearVal;
+	bottom = -m_Aspect*m_RProjZ * zNearVal;
+	top = +m_Aspect*m_RProjZ * zNearVal;
+	zNear = 1.0f * zNearVal;
+	zFar = 32768.0f;
+	if (requestNearZRangeHackProjection) {
+		zFar *= zScaleVal;
+	}
+
+	invRightMinusLeft = 1.0f / (right - left);
+	invTopMinusBottom = 1.0f / (top - bottom);
+	invNearMinusFar = 1.0f / (zNear - zFar);
+
+	mat4 d3dProj;
+	d3dProj.elem[0][0] = 2.0f * zNear * invRightMinusLeft;
+	d3dProj.elem[0][1] = 0.0f;
+	d3dProj.elem[0][2] = 0.0f;
+	d3dProj.elem[0][3] = 0.0f;
+
+	d3dProj.elem[1][0] = 0.0f;
+	d3dProj.elem[1][1] = 2.0f * zNear * invTopMinusBottom;
+	d3dProj.elem[1][2] = 0.0f;
+	d3dProj.elem[1][3] = 0.0f;
+
+	d3dProj.elem[2][0] = 0*1.0f / (FLOAT)FrameX;
+	d3dProj.elem[2][1] = 0*-1.0f / (FLOAT)FrameY;
+	d3dProj.elem[2][2] = -zScaleVal * (zFar * invNearMinusFar);
+	d3dProj.elem[2][3] = 1.0f;
+
+	d3dProj.elem[3][0] = 0.0f;
+	d3dProj.elem[3][1] = 0.0f;
+	d3dProj.elem[3][2] = zScaleVal * zScaleVal * (zNear * zFar * invNearMinusFar);
+	d3dProj.elem[3][3] = 0.0f;
+
+	// should equal
+	g_current_projection = transpose(d3dProj);
+	//mat4 t = perspectiveMatrixX(m_Fov, FrameFX, FrameFY, zNear, zFar, true);
+
+	return;
+}
+
+void UVulkanRenderDevice::SetOrthoProjection(void) {
+	float left, right, bottom, top, zNear, zFar;
+	float invRightMinusLeft, invTopMinusBottom, invNearMinusFar;
+
+	left = -m_RProjZ * 0.5f;
+	right = +m_RProjZ * 0.5f;
+	bottom = -m_Aspect*m_RProjZ * 0.5f;
+	top = +m_Aspect*m_RProjZ * 0.5f;
+	zNear = 1.0f * 0.5f;
+	zFar = 32768.0f;
+
+	invRightMinusLeft = 1.0f / (right - left);
+	invTopMinusBottom = 1.0f / (top - bottom);
+	invNearMinusFar = 1.0f / (zNear - zFar);
+
+	mat4 d3dProj;
+	d3dProj.elem[0][0] = 2.0f * invRightMinusLeft;
+	d3dProj.elem[0][1] = 0.0f;
+	d3dProj.elem[0][2] = 0.0f;
+	d3dProj.elem[0][3] = 0.0f;
+
+	d3dProj.elem[1][0] = 0.0f;
+	d3dProj.elem[1][1] = -2.0f * invTopMinusBottom;
+	d3dProj.elem[1][2] = 0.0f;
+	d3dProj.elem[1][3] = 0.0f;
+
+	d3dProj.elem[2][0] = 0.0f;
+	d3dProj.elem[2][1] = 0.0f;
+	d3dProj.elem[2][2] = -1.0f * invNearMinusFar;
+	d3dProj.elem[2][3] = 0.0f;
+
+	d3dProj.elem[3][0] = -1.0f / (FLOAT)FrameX;
+	d3dProj.elem[3][1] = 1.0f / (FLOAT)FrameY;
+	d3dProj.elem[3][2] = zNear * invNearMinusFar;
+	d3dProj.elem[3][3] = 1.0f;
+
+	g_current_projection = d3dProj;
 }

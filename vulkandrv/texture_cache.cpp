@@ -33,12 +33,12 @@ struct TextureMetaData {
 };
 
 void Paletted2RGBA8(const FTextureInfo *, DWORD flags, DWORD* dst, uint32_t dst_size, int level);
-
+	bool bUseSRGB = false;
 // Unreal to vulkan
 const static TextureFormat g_format_reg[] = {
-	{true, 0, 0, false, RHIFormat::kR8G8B8A8_SRGB, &Paletted2RGBA8}, /**< TEXF_P8 = 0x00 */
-	{true, 0, 0, true, RHIFormat::kR8G8B8A8_SRGB, nullptr},		  /**< TEXF_RGBA7	= 0x01 */
-	{false, 0, 0, true, RHIFormat::kR8G8B8A8_SRGB, nullptr},		  /**< TEXF_RGB16	= 0x02 */
+	{true, 0, 0, false, bUseSRGB ? RHIFormat::kR8G8B8A8_SRGB : RHIFormat::kR8G8B8A8_UNORM, &Paletted2RGBA8}, /**< TEXF_P8 = 0x00 */
+	{true, 0, 0, true, bUseSRGB  ? RHIFormat::kR8G8B8A8_SRGB : RHIFormat::kR8G8B8A8_UNORM, nullptr},		  /**< TEXF_RGBA7	= 0x01 */
+	{false, 0, 0, true, bUseSRGB ? RHIFormat::kR8G8B8A8_SRGB : RHIFormat::kR8G8B8A8_UNORM, nullptr},		  /**< TEXF_RGB16	= 0x02 */
 #if 0
 	{true,4,8,true,DXGI_FORMAT_BC1_UNORM,nullptr},									/**< TEXF_DXT1 = 0x03 */
 	{false,0,0,true,DXGI_FORMAT_UNKNOWN,nullptr},									/**< TEXF_RGB8 = 0x04 */
@@ -145,6 +145,8 @@ void Paletted2RGBA8(const FTextureInfo *TexInfo, DWORD PolyFlags, DWORD* dst, ui
 		dst++;
 	}
 	assert((BYTE*)dst - start == dst_size);
+
+	// TODO: restore palette0 color!
 }
 
 static TextureMetaData buildMetaData(const FTextureInfo *TexInfo, DWORD PolyFlags,

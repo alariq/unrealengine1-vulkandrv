@@ -1007,6 +1007,22 @@
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension).spv.bin</Outputs>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">false</ExcludedFromBuild>
     </CustomBuild>
+    <CustomBuild Include="shaders\gouraud-surface.vert">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(SolutionDir)make-spir-v.bat %(FullPath) $(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension)</Command>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension).spv.bin</Outputs>
+    </CustomBuild>
+    <CustomBuild Include="shaders\gouraud-surface.frag">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(SolutionDir)make-spir-v.bat %(FullPath) $(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension)</Command>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension).spv.bin</Outputs>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">false</ExcludedFromBuild>
+    </CustomBuild>
+    <CustomBuild Include="shaders\gouraud-surface-atest.frag">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(SolutionDir)make-spir-v.bat %(FullPath) $(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension)</Command>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Unreal Tournament Debug|Win32'">$(ProjectDir)..\packages\$(GAMENAME)\$(ProjectName)\%(Filename)%(Extension).spv.bin</Outputs>
+    </CustomBuild>
     <None Include="VulkanDrv.int" />
   </ItemGroup>
   <ItemGroup>
