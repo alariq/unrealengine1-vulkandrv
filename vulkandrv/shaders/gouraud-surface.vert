@@ -15,6 +15,11 @@ layout(set=0, binding=2) uniform PerDrawCallData_t {
     mat4 model;
 } PerDrawCallData;
 
+// this is dynamic UB, should be setup once and offset provided during bind ds
+layout(set=1, binding=0) uniform PerDrawCallVSData_t {
+    mat4 proj;
+} PerDrawVSData;
+
 ////////////////////////////////////////////////////////////////////////////////
 
 out gl_PerVertex
@@ -27,7 +32,7 @@ layout(location = 1) out vec4 v_Color;
 layout(location = 2) out vec4 v_FogColor;
 
 void main() {
-    gl_Position = vec4(Pos.xyz,1) * /*PerFrameData.world * PerFrameData.view * */PerFrameData.proj;
+    gl_Position = vec4(Pos.xyz,1) * PerDrawVSData.proj;
 	v_TexCoord = TexCoord;
 	v_Color = Color;
 	v_FogColor = FogColor;

@@ -70,6 +70,7 @@ std::vector<const char*> req_device_ext;
 
 static const bool s_enable_validation_layers = !M_IS_DEFINED(NDEBUG);
 //#define USE_NSIGHT
+#define NO_VALIDATION 
 std::vector<const char*> get_validation_layers() {
 	uint32_t count;
 	vkEnumerateInstanceLayerProperties(&count, nullptr);
@@ -77,7 +78,7 @@ std::vector<const char*> get_validation_layers() {
 	vkEnumerateInstanceLayerProperties(&count, available_layers.data());
 
 	std::vector<const char*> actual_layer_names2enable;
-#if !defined(USE_NSIGHT) // otherwise crashes
+#if !defined(USE_NSIGHT) && !defined(NO_VALIDATION) // otherwise crashes
 	for (int i = 0; i < countof(s_validation_layers); ++i) {
 		const char* name = s_validation_layers[i];
 		bool b_found = false;
@@ -164,7 +165,7 @@ debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
 	}
 	else if (messageSeverity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
 		log_warning("validation layer: %s\n", pCallbackData->pMessage);
-	}
+}
 	else {
 		log_info("validation layer: %s\n", pCallbackData->pMessage);
 	}

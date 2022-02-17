@@ -85,11 +85,11 @@ struct BufferView {
 	int size_;
 
 	const El_t &operator[](int i) const {
-		check(i >= 0 && i < size_);
+		assert(i >= 0 && i < size_);
 		return *(El_t *)(data_ + el_size_ * i);
 	}
 	El_t &operator[](int i) {
-		check(i >= 0 && i < size_);
+		assert(i >= 0 && i < size_);
 		return *(El_t *)(data_ + el_size_ * i);
 	}
 
@@ -131,7 +131,7 @@ struct UEPerDrawCallUniformBuf {
 	mat4 world;
 };
 
-struct UEPerDrawCallVsData {
+struct UEPerDrawCallComplexVsData {
 	vec4 XAxis_UDot;
 	vec4 YAxis_VDot;
 	vec4 Diffuse_PanXY_UVMult;
@@ -141,6 +141,12 @@ struct UEPerDrawCallVsData {
 	vec4 HasLightmap_UVScale;
 	vec4 Detail_PanXY_UVMult;
 	vec4 HasDetail_UVScale;
+	mat4 proj;
+};
+
+struct UEPerDrawCallGouraudVsData {
+	mat4 proj; // yes as it can be changed during the frame draw
+	// other stuff?
 };
 
 struct UEPerFrameUniformBuf {
@@ -149,6 +155,7 @@ struct UEPerFrameUniformBuf {
 };
 
 mat4 g_current_projection = mat4::identity();
+RHIViewport g_current_viewport;
 
 RHIVertexInputBindingDesc vert_bindings_desc[] = {
 	{0, sizeof(SimpleVertex), RHIVertexInputRate::kVertex}};
@@ -360,18 +367,6 @@ SBuffer* g_cube_vb = nullptr;
 SShader* g_cube_shader = nullptr;
 
 IRHISampler* g_test_sampler = nullptr;
-#if 0
-struct ComplexDescriptorSetData {
-	IRHIImageView* diffuse_view;
-	// some other stuff
-
-	// dset created based on this data
-	IRHIDescriptorSet* dset;
-	bool operator=(const ComplexDescriptorSetData& dsd) {
-		return dsd.diffuse_view == diffuse_view;
-	}
-};
-#endif
 
 enum PipelineBlend : uint8_t {
 	kPipeBlendNo,
@@ -432,6 +427,7 @@ struct ComplexSurfaceDrawCall {
 	bool b_depth_write;
 	bool b_alpha_test;
 	SurfaceShader surface_shader;
+	RHIViewport viewport;
 };
 
 const uint32_t gUENumVert = 256 * 1024;
@@ -454,14 +450,79 @@ SBuffer* g_ue_gouraud_ib[kNumBufferedFrames] = { 0 };
 uint32_t g_ue_gouraud_ib_size[kNumBufferedFrames] = { 0 };
 
 // dynamic UB for VS per draw call data
+template<typename T>
+struct DynamicUB {
+private:
+	~DynamicUB() {}
+public:
+	typedef typename T El_t;
+	SBuffer *buf[kNumBufferedFrames] = {0};
+	uint32_t size[kNumBufferedFrames] = {0};
+	IRHIDescriptorSet *dset[kNumBufferedFrames] = {0};
+	uint32_t el_size = 0;
+	uint32_t num_el = 0;
+	// descriptor set (one per frame) designed to store per frame data (proj. matrix and stuff)
+	// for now only stores VS data using dynamic UB (so no need to have ds per draw call)
+	IRHIDescriptorSetLayout *ds_layout = 0;
+
+	static DynamicUB<T>* make(uint32_t count, const IRHIDescriptorSetLayout* dsl, IRHIDevice* dev) {
+		DynamicUB* ub = new DynamicUB<T>();
+		ub->num_el = count;
+
+		// offsetAlignment is also our element size (obviously)
+		// there are restrictions on alignment of dynamic UB offsets
+		uint32_t minUboAlignment = dev->GetProperties().minUniformBufferOffsetAlignment;
+		uint32_t offsetAlignment = sizeof(typename T);
+		if (minUboAlignment > 0) {
+			// this alignment can only be >= sizeof(T) as it is also an offset :-)
+			offsetAlignment = (offsetAlignment + minUboAlignment - 1) & ~(minUboAlignment - 1);
+		}
+		ub->el_size = offsetAlignment;
+		// I just hope that UB alignment will be max possible alignment for any possible usage
+		// (like our dynamic descriptor)
+		for (int i = 0; i < kNumBufferedFrames; ++i) {
+			ub->buf[i] = SBuffer::makeUB(dev, ub->num_el * ub->el_size, nullptr);
+			ub->size[i] = 0;
+			ub->dset[i] = dev->AllocateDescriptorSet(dsl);
+
+			RHIDescriptorWriteDesc vs_ds_write_desc;
+			RHIDescriptorWriteDescBuilder builder(&vs_ds_write_desc, 1);
+			// VkDescriptorBufferInfo man page
+			// For VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC and
+			// VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC descriptor types, offset is the base offset
+			// from which the dynamic offset is applied and range is the static size used for all
+			// dynamic offsets.
+			builder.add(ub->dset[i], 0, ub->buf[i]->device_buf_, 0, offsetAlignment);
+			dev->UpdateDescriptorSet(&vs_ds_write_desc, builder.cur_index);
+
+		}
+		return ub;
+	}
+
+	void destroy(IRHIDevice* dev) {
+		for (int i = 0; i < kNumBufferedFrames; ++i) {
+			ub->buf->Destroy(dev);
+		}
+		// free dset
+		// dev->ReleaseDescriptorSet(ub->dset);
+
+		delete this;
+	}
+};
+
+// dynamic UB for VS per draw call data
+#if 0
 SBuffer* g_ue_vs_ub[kNumBufferedFrames] = { 0 };
 uint32_t g_ue_vs_ub_el_size = 0;
 const uint32_t g_ue_vs_ub_num_el = gUEDrawCalls;
 uint32_t g_ue_vs_ub_size[kNumBufferedFrames] = { 0 };
 // descriptor set (one per frame) designed to store per frame data (proj. matrix and stuff)
 // for now only stores VS data using dynamic UB (so no need to have ds per draw call)
-IRHIDescriptorSetLayout* g_ue_vs_ub_dsl = 0;
 IRHIDescriptorSet* g_ue_vs_ub_ds[kNumBufferedFrames] = {0};
+#endif
+IRHIDescriptorSetLayout* g_ue_vs_ub_dsl = 0;
+DynamicUB<UEPerDrawCallComplexVsData>* g_ue_complex_vs_ub = nullptr;
+DynamicUB<UEPerDrawCallGouraudVsData>* g_ue_gouraud_vs_ub = nullptr;
 
 SShader* g_ue_complex_shader = nullptr;
 SShader* g_ue_complex_shader_alpha_test = nullptr;
@@ -519,10 +580,10 @@ void ue_update_per_frame_uniforms(int idx, IRHIDevice* dev, DWORD DetailTexColor
 	assert(idx >= 0 && idx < kNumBufferedFrames);
 	g_ue_per_frame_uniforms_ptr[idx]->proj = g_current_projection;
 	vec4 det_color;
-	det_color.x = DetailTexColor&0xFF;
-	det_color.y = (DetailTexColor>>8)&0xFF;
-	det_color.z = (DetailTexColor>>16)&0xFF;
-	det_color.w = (DetailTexColor>>24)&0xFF;
+	det_color.x = (float)(DetailTexColor&0xFF);
+	det_color.y = (float)((DetailTexColor>>8)&0xFF);
+	det_color.z = (float)((DetailTexColor>>16)&0xFF);
+	det_color.w = (float)((DetailTexColor>>24)&0xFF);
 	det_color *= 1.0f/255.0f;
 	det_color = clamp(det_color, 0,1);
 	g_ue_per_frame_uniforms_ptr[idx]->DetailColor = det_color;
@@ -860,7 +921,6 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 		g_ue_gouraud_ib[i] = SBuffer::makeIB(device, gUENumIndices* sizeof(uint32_t), nullptr);
 		g_ue_gouraud_ib_size[i] = 0;
 
-
 		// TODO: check flags
 		g_ue_per_draw_call_uniforms[i] = device->CreateBuffer(
 			sizeof(UEPerDrawCallUniformBuf)*gUEDrawCalls, RHIBufferUsageFlagBits::kUniformBufferBit,
@@ -873,37 +933,11 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 			RHIMemoryPropertyFlagBits::kHostVisible, RHISharingMode::kExclusive);
 		g_ue_per_frame_uniforms_ptr[i] =
 			(UEPerFrameUniformBuf*)g_ue_per_frame_uniforms[i]->Map(device, 0, 0xFFFFFFFF, 0);
-
-		// dynamic buffer & its ds
-		{
-			// offsetAlignment is also our element size (obviously)
-			// there are restrictions on alignment of dynamic UB offsets
-			uint32_t minUboAlignment = device->GetProperties().minUniformBufferOffsetAlignment;
-			uint32_t offsetAlignment = sizeof(UEPerDrawCallVsData);
-			if (minUboAlignment > 0) {
-				// this alignment can only be >= sizeof(UEPerDrawCallVsData) as it is also an offset : -)
-				offsetAlignment = (offsetAlignment + minUboAlignment - 1) & ~(minUboAlignment - 1);
-			}
-			g_ue_vs_ub_el_size = offsetAlignment;
-			// I just hope that UB alignment will be max possible alignment for any possible usage
-			// (like our dynamic descriptor)
-			g_ue_vs_ub[i] = SBuffer::makeUB(device, g_ue_vs_ub_num_el * g_ue_vs_ub_el_size, nullptr);
-			g_ue_vs_ub_size[i] = 0;
-			g_ue_vs_ub_ds[i] = device->AllocateDescriptorSet(g_ue_vs_ub_dsl);
-
-			RHIDescriptorWriteDesc vs_ds_write_desc;
-			RHIDescriptorWriteDescBuilder builder(&vs_ds_write_desc, 1);
-			// VkDescriptorBufferInfo man page
-			// For VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC and
-			// VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC descriptor types, offset is the base offset
-			// from which the dynamic offset is applied and range is the static size used for all
-			// dynamic offsets.
-			builder.add(g_ue_vs_ub_ds[i], 0, g_ue_vs_ub[i]->device_buf_, 0,
-						offsetAlignment);
-			device->UpdateDescriptorSet(&vs_ds_write_desc, builder.cur_index);
-		}
-
 	}
+
+	g_ue_complex_vs_ub = DynamicUB<UEPerDrawCallComplexVsData>::make(gUEDrawCalls, g_ue_vs_ub_dsl, device);
+	g_ue_gouraud_vs_ub = DynamicUB<UEPerDrawCallGouraudVsData>::make(gUEDrawCalls*2, g_ue_vs_ub_dsl, device);
+
 	g_ue_complex_shader = SShader::load(device, "vulkandrv/complex-surface.vert.spv.bin",
 										"vulkandrv/complex-surface.frag.spv.bin");
 
@@ -1251,7 +1285,7 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	IRHIPipelineLayout *ue_complex_pipeline_layout =
 		device->CreatePipelineLayout(ue_complex_pipe_layout_desc, countof(ue_complex_pipe_layout_desc));
 
-	const IRHIDescriptorSetLayout* ue_gouraud_pipe_layout_desc[] = { g_ue_dsl_gouraud };
+	const IRHIDescriptorSetLayout* ue_gouraud_pipe_layout_desc[] = { g_ue_dsl_gouraud, g_ue_vs_ub_dsl };
 	IRHIPipelineLayout *ue_gouraud_pipeline_layout =
 		device->CreatePipelineLayout(ue_gouraud_pipe_layout_desc, countof(ue_gouraud_pipe_layout_desc));
 
@@ -1614,7 +1648,7 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 		// TODO: do not copy whole array! only actual filled frame data 
 		g_ue_complex_vb[g_curFBIdx]->CopyToGPU(dev, cb);
 		g_ue_complex_ib[g_curFBIdx]->CopyToGPU(dev, cb);
-		g_ue_vs_ub[g_curFBIdx]->CopyToGPU(dev, cb);
+		g_ue_complex_vs_ub->buf[g_curFBIdx]->CopyToGPU(dev, cb);
 	}
 
 	//if (!g_gouraud_draw_calls.empty()) {
@@ -1623,6 +1657,7 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 		// TODO: do not copy whole array! only actual filled frame data 
 		g_ue_gouraud_vb[g_curFBIdx]->CopyToGPU(dev, cb);
 		g_ue_gouraud_ib[g_curFBIdx]->CopyToGPU(dev, cb);
+		g_ue_gouraud_vs_ub->buf[g_curFBIdx]->CopyToGPU(dev, cb);
 	}
 
 	//cb->Barrier_PresentToClear(fb_image);
@@ -1692,7 +1727,7 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 			assert(g_ue_pipelines.count(key));
 			IRHIGraphicsPipeline* pipeline = g_ue_pipelines[key];
 			cb->BindPipeline(RHIPipelineBindPoint::kGraphics, pipeline);
-			cb->SetViewport(&viewport, 1);
+			cb->SetViewport(&dc.viewport, 1);
 
 			if (dc.dset) {
 
@@ -1730,13 +1765,15 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 				dev->UpdateDescriptorSet(desc_write_desc, builder.cur_index);
 
 				if (is_complex) {
-					const IRHIDescriptorSet *sets[] = {dc.dset, g_ue_vs_ub_ds[g_curFBIdx]};
-					uint32_t dyn_offsets[] = {dc.vs_ub_idx * g_ue_vs_ub_el_size};
+					const IRHIDescriptorSet *sets[] = {dc.dset, g_ue_complex_vs_ub->dset[g_curFBIdx]};
+					uint32_t dyn_offsets[] = {dc.vs_ub_idx * g_ue_complex_vs_ub->el_size};
 					cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, pipeline->Layout(),
 										   sets, countof(sets), countof(dyn_offsets), dyn_offsets);
 				} else {
+					const IRHIDescriptorSet *sets[] = {dc.dset, g_ue_gouraud_vs_ub->dset[g_curFBIdx]};
+					uint32_t dyn_offsets[] = {dc.vs_ub_idx * g_ue_gouraud_vs_ub->el_size};
 					cb->BindDescriptorSets(RHIPipelineBindPoint::kGraphics, pipeline->Layout(),
-										   &dc.dset, 1, 0, nullptr);
+										   sets, countof(sets), countof(dyn_offsets), dyn_offsets);
 				}
 			}
 
@@ -1804,13 +1841,14 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 	g_ue_complex_vb_size[g_curFBIdx] = 0;
 	g_ue_complex_ib_size[g_curFBIdx] = 0;
 	g_ue_complex_dsets_reserved[g_curFBIdx] = 0;
-	g_ue_vs_ub_size[g_curFBIdx] = 0;
-	g_draw_calls.resize(0);
+	g_ue_complex_vs_ub->size[g_curFBIdx] = 0;
 
 	g_ue_gouraud_vb_size[g_curFBIdx] = 0;
 	g_ue_gouraud_ib_size[g_curFBIdx] = 0;
 	g_ue_gouraud_dsets_reserved[g_curFBIdx] = 0;
-	//g_gouraud_draw_calls.resize(0);
+	g_ue_gouraud_vs_ub->size[g_curFBIdx] = 0;
+
+	g_draw_calls.resize(0);
 
 	sanity_lock_cnt--;
 }
@@ -1920,10 +1958,12 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 	uint32_t& cur_vb_idx = g_ue_complex_vb_size[g_curFBIdx];
 	uint32_t& cur_ib_idx = g_ue_complex_ib_size[g_curFBIdx];
 
-	uint32_t& cur_vs_data_idx = g_ue_vs_ub_size[g_curFBIdx];
 	
-	BufferView<UEPerDrawCallVsData> vs_uniforms(g_ue_vs_ub[g_curFBIdx]->getMappedPtr(),
-												g_ue_vs_ub_el_size, g_ue_vs_ub_num_el);
+	uint32_t& cur_vs_data_idx = g_ue_complex_vs_ub->size[g_curFBIdx];
+	BufferView<UEPerDrawCallComplexVsData> vs_uniforms(
+		g_ue_complex_vs_ub->buf[g_curFBIdx]->getMappedPtr(), g_ue_complex_vs_ub->el_size,
+		g_ue_complex_vs_ub->num_el);
+
 	vs_uniforms[cur_vs_data_idx].XAxis_UDot = vec4(*(vec3 *)&Facet.MapCoords.XAxis.X, UDot);
 	vs_uniforms[cur_vs_data_idx].YAxis_VDot = vec4(*(vec3 *)&Facet.MapCoords.YAxis.X, VDot);
 	vs_uniforms[cur_vs_data_idx].Diffuse_PanXY_UVMult =
@@ -2057,6 +2097,7 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 		assert((0==rhi_detail && 0==rhi_fog) || (!!rhi_fog ^ !!rhi_detail));
 		dc.detail = rhi_detail ? rhi_detail : rhi_fog;
 		dc.macro = rhi_macro;
+		dc.viewport = g_current_viewport;
 		// TODO: rework this to a simple free list of dsets
 		if (g_ue_complex_dsets[g_curFBIdx].size() == (size_t)g_ue_complex_dsets_reserved[g_curFBIdx]) {
 			g_ue_complex_dsets[g_curFBIdx].push_back(
@@ -2133,6 +2174,12 @@ void UVulkanRenderDevice::DrawGouraudPolygon(FSceneNode *Frame, FTextureInfo &In
 	const float UMult = 1.0f / (Info.UScale * Info.USize);
 	const float VMult = 1.0f / (Info.VScale * Info.VSize);
 
+	uint32_t& cur_vs_data_idx = g_ue_gouraud_vs_ub->size[g_curFBIdx];
+	BufferView<UEPerDrawCallGouraudVsData> vs_uniforms(
+		g_ue_gouraud_vs_ub->buf[g_curFBIdx]->getMappedPtr(), g_ue_gouraud_vs_ub->el_size,
+		g_ue_gouraud_vs_ub->num_el);
+	vs_uniforms[cur_vs_data_idx++].proj = g_current_projection;
+
 	uint32_t& cur_vb_idx = g_ue_gouraud_vb_size[g_curFBIdx];
 	uint32_t& cur_ib_idx = g_ue_gouraud_ib_size[g_curFBIdx];
 	const uint32_t vb_offset = cur_vb_idx;
@@ -2196,7 +2243,8 @@ void UVulkanRenderDevice::DrawGouraudPolygon(FSceneNode *Frame, FTextureInfo &In
 	dc.detail = nullptr;
 	dc.lightmap = nullptr;
 	dc.macro = nullptr;
-	dc.vs_ub_idx = 0xFFFFFFFF;
+	dc.vs_ub_idx = cur_vs_data_idx-1;
+	dc.viewport = g_current_viewport;
 	// TODO: rework this to a simple free list of dsets
 	if (g_ue_gouraud_dsets[g_curFBIdx].size() == (size_t)g_ue_gouraud_dsets_reserved[g_curFBIdx]) {
 		g_ue_gouraud_dsets[g_curFBIdx].push_back(
@@ -2266,6 +2314,12 @@ void UVulkanRenderDevice::DrawTile(FSceneNode *Frame, FTextureInfo &Info, FLOAT 
 	FLOAT SU2 = (U + UL) * TexInfoUMult;
 	FLOAT SV1 = (V) * TexInfoVMult;
 	FLOAT SV2 = (V + VL) * TexInfoVMult;
+
+	uint32_t& cur_vs_data_idx = g_ue_gouraud_vs_ub->size[g_curFBIdx];
+	BufferView<UEPerDrawCallGouraudVsData> vs_uniforms(
+		g_ue_gouraud_vs_ub->buf[g_curFBIdx]->getMappedPtr(), g_ue_gouraud_vs_ub->el_size,
+		g_ue_gouraud_vs_ub->num_el);
+	vs_uniforms[cur_vs_data_idx++].proj = g_current_projection;
 
 	uint32_t& cur_vb_idx = g_ue_gouraud_vb_size[g_curFBIdx];
 	uint32_t& cur_ib_idx = g_ue_gouraud_ib_size[g_curFBIdx];
@@ -2349,7 +2403,8 @@ void UVulkanRenderDevice::DrawTile(FSceneNode *Frame, FTextureInfo &Info, FLOAT 
 	dc.detail = nullptr;
 	dc.lightmap = nullptr;
 	dc.macro = nullptr;
-	dc.vs_ub_idx = 0xFFFFFFFF;
+	dc.vs_ub_idx = cur_vs_data_idx-1;
+	dc.viewport = g_current_viewport;
 	// TODO: rework this to a simple free list of dsets
 	if (g_ue_gouraud_dsets[g_curFBIdx].size() == (size_t)g_ue_gouraud_dsets_reserved[g_curFBIdx]) {
 		g_ue_gouraud_dsets[g_curFBIdx].push_back(
@@ -2472,6 +2527,12 @@ void UVulkanRenderDevice::SetSceneNode(FSceneNode* Frame)
 	}
 	#endif
 
+	g_current_viewport.x =  Frame->XB;
+	g_current_viewport.y =  Frame->YB;
+	g_current_viewport.width = Frame->X;
+	g_current_viewport.height = Frame->Y;
+	g_current_viewport.minDepth = 0.0f;
+	g_current_viewport.maxDepth = 1.0f;
 
 	// Viewport is set here as it changes during gameplay. For example in DX conversations
  	//D3D::setViewPort(Frame->X,Frame->Y,Frame->XB,Frame->YB); 

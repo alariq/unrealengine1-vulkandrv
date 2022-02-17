@@ -24,6 +24,7 @@ layout(set=1, binding=0) uniform PerDrawCallVSData_t {
     vec4 HasLightmap_UVScale;
 	vec4 Detail_PanXY_UVMult;
 	vec4 HasDetail_UVScale;//x-has detail, yz UVScale, w -is_fog
+    mat4 proj;
 } PerDrawVSData;
 
 
