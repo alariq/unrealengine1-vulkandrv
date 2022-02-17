@@ -1212,8 +1212,8 @@ void RHIBufferVk::Flush(IRHIDevice* device, uint32_t offset, uint32_t size) {
       VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,            // VkStructureType        sType
       nullptr,                                          // const void            *pNext
       backing_mem_,                                     // VkDeviceMemory         memory
-      offset,                                   // VkDeviceSize           offset
-      size// VkDeviceSize           size
+      offset,											// VkDeviceSize           offset
+      size?size:VK_WHOLE_SIZE							// VkDeviceSize           size
     };
 	vkFlushMappedMemoryRanges(dev->Handle(), 1, &flush_range);
 }

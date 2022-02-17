@@ -69,7 +69,7 @@ static const char* const s_validation_layers[] = {
 std::vector<const char*> req_device_ext;
 
 static const bool s_enable_validation_layers = !M_IS_DEFINED(NDEBUG);
-
+//#define USE_NSIGHT
 std::vector<const char*> get_validation_layers() {
 	uint32_t count;
 	vkEnumerateInstanceLayerProperties(&count, nullptr);
@@ -77,7 +77,7 @@ std::vector<const char*> get_validation_layers() {
 	vkEnumerateInstanceLayerProperties(&count, available_layers.data());
 
 	std::vector<const char*> actual_layer_names2enable;
-#if USE_NSIGHT // otherwise crashes
+#if !defined(USE_NSIGHT) // otherwise crashes
 	for (int i = 0; i < countof(s_validation_layers); ++i) {
 		const char* name = s_validation_layers[i];
 		bool b_found = false;
