@@ -2437,6 +2437,7 @@ void UVulkanRenderDevice::ClearZ(FSceneNode* Frame)
 	dc.b_alpha_test = false;
 	dc.surface_shader = kSurfaceShaderClearDepth;
 
+	dc.viewport = g_current_viewport;
 	dc.vb_offset = 0;
 	dc.num_vertices = 6;
 	dc.ib_offset = 0;
