@@ -546,6 +546,8 @@ mat4 orthoMatrix(const float left, const float right, const float top, const flo
 mat4 perspectiveMatrixX(const float fov, const int width, const int height, const float zNear, const float zFar, const bool d3dStyle);
 mat4 perspectiveMatrixY(const float fov, const int width, const int height, const float zNear, const float zFar, const bool d3dStyle);
 
+mat4 perspectiveMatrixXReverseZ(const float fov, const int width, const int height, const float zNear, const float zFar);
+
 /** Creates a perspective-correct projection matrix */
 mat4 frustumProjMatrix(const float left, const float right, const float bottom, const float top, const float near, const float far);
 

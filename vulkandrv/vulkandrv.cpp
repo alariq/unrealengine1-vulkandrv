@@ -1200,7 +1200,7 @@ UBOOL UVulkanRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT N
 	RHIDepthStencilState ds_state;
 	ds_state.depthTestEnable = true;
 	ds_state.depthWriteEnable = true;
-	ds_state.depthCompareOp = RHICompareOp::kLessOrEqual;
+	ds_state.depthCompareOp = RHICompareOp::kGreaterOrEqual;
 	ds_state.depthBoundsTestEnable = false;
 	ds_state.stencilTestEnable = false;
 	ds_state.front = front_n_back;
@@ -1667,7 +1667,7 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 	//		  (uint32_t)RHIImageAspectFlags::kDepth);
 
 	ivec4 render_area(0, 0, fb_image->Width(), fb_image->Height());
-	RHIClearValue clear_values[] = { {vec4(0, 255, 0, 0), 0.0f, 0}, {vec4(0, 0, 0, 0), 1.0f, 0} };
+	RHIClearValue clear_values[] = { {vec4(0, 255, 0, 0), 0.0f, 0}, {vec4(0, 0, 0, 0), 0.0f, 0} };
 	// it is important we pass fb corresponding to current swapchain index as we will be waiting on it in Present()
 	cb->BeginRenderPass(g_main_pass, cur_fb, &render_area, clear_values, (uint32_t)countof(clear_values));
 
@@ -2300,14 +2300,14 @@ void UVulkanRenderDevice::DrawTile(FSceneNode *Frame, FTextureInfo &Info, FLOAT 
 
 	if (!(PolyFlags & PF_Modulated)) {
 #ifdef UTGLR_RUNE_BUILD
-	if (PolyFlags & PF_AlphaBlend) {
-		Color.W = Info.Texture->Alpha;
-		tileColor = FPlaneTo_BGRAClamped(&Color);
-	} else {
-		tileColor = FPlaneTo_BGRClamped_A255(&Color);
-	}
+		if (PolyFlags & PF_AlphaBlend) {
+			Color.W = Info.Texture->Alpha;
+			tileColor = FPlaneTo_BGRAClamped(&Color);
+		} else {
+			tileColor = FPlaneTo_BGRClamped_A255(&Color);
+		}
 #else
-	tileColor = FPlaneTo_BGRClamped_A255(&Color);
+		tileColor = FPlaneTo_BGRClamped_A255(&Color);
 #endif
 	}
 
@@ -2419,6 +2419,8 @@ void UVulkanRenderDevice::DrawTile(FSceneNode *Frame, FTextureInfo &Info, FLOAT 
 	//g_gouraud_draw_calls.emplace_back(dc);
 	g_draw_calls.emplace_back(dc);
 
+	g_idx++;
+
 	//log_info("DrawTile");
 
 }
@@ -2512,7 +2514,6 @@ void UVulkanRenderDevice::SetSceneNode(FSceneNode* Frame)
 	m_Fov = Viewport->Actor->FovAngle * PI / 180.0f;
 	m_RProjZ = appTan(m_Fov/2.0f);
 
-	g_current_projection = perspectiveMatrixX(m_Fov, Frame->FX, Frame->FY, zNear, zFar, false);
 	FrameX = (float)Frame->X;
 	FrameY = (float)Frame->Y;
 	FrameFX = (float)Frame->FX;
@@ -2663,8 +2664,9 @@ void UVulkanRenderDevice::SetProjection(bool requestNearZRangeHackProjection) {
 	d3dProj.elem[3][3] = 0.0f;
 
 	// should equal
-	g_current_projection = transpose(d3dProj);
-	//mat4 t = perspectiveMatrixX(m_Fov, FrameFX, FrameFY, zNear, zFar, true);
+	//g_current_projection = transpose(d3dProj);
+	//g_current_projection = perspectiveMatrixX(m_Fov, FrameFX, FrameFY, zNear, zFar, false);
+	g_current_projection = perspectiveMatrixXReverseZ(m_Fov, FrameFX, FrameFY, zNear, zFar);
 
 	return;
 }

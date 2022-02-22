@@ -857,6 +857,19 @@ mat4 perspectiveMatrixX(const float fov, const int width, const int height, cons
 	return mat;
 }
 
+mat4 perspectiveMatrixXReverseZ(const float fov, const int width, const int height, const float zNear, const float zFar){
+	float w = tanf(0.5f * fov);
+	float h = (w * height) / width;
+
+	mat4 mat(
+		1.0f / w, 0,        0, 0,
+		0,        1.0f / h, 0, 0,
+		0,        0,        (zNear) / (zNear - zFar), -(zFar * zNear) / (zNear - zFar),
+		0,        0,        1, 0);
+
+	return mat;
+}
+
 mat4 perspectiveMatrixY(const float fov, const int width, const int height, const float zNear, const float zFar, const bool d3dStyle){
 	float h = tanf(0.5f * fov);
 	float w = (h * width) / height;
