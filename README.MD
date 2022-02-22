@@ -10,7 +10,7 @@ What is implemented
 
 What is missing
 ===============
- - Optimization. Code is not optimized at all and was written for correctness first. I am planning to optimize it at some point (this should not be hard).
+ - Optimization & Mem/Resource management. Code is not optimized at all and was written for correctness first. I am planning to optimize it at some point (this should not be hard). Expect occasional crashes due to descriptor sets, exceeding amount of mem allocations in vulkan and other. Validation is disabled on purpose :-)
  - Mipmap support is missing (easy to add)
  - Build scripts. I did not want to spend time on not fun stuff, so here you are.. VS project which is setup for Unreal Tournament Debug Win32
 
