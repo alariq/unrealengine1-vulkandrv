@@ -2077,8 +2077,9 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 		dc.b_alpha_test = Flags & PF_Masked;
 
 		// either alpha test or blend
-		assert((!dc.b_alpha_test && kPipeBlendNo == dc.pipeline_blend) ||
-			   (dc.b_alpha_test ^ (!!dc.pipeline_blend)));
+		// apparently alpha + blend is also ok (happend on dm-barricade)
+		//assert((!dc.b_alpha_test && kPipeBlendNo == dc.pipeline_blend) ||
+		//	   (dc.b_alpha_test ^ (!!dc.pipeline_blend)));
 
 		if(dc.b_alpha_test && kPipeBlendNo != dc.pipeline_blend) {
 			log_info("alpha test + alpha blend");
