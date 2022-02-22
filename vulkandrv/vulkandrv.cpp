@@ -2296,6 +2296,8 @@ void UVulkanRenderDevice::DrawTile(FSceneNode *Frame, FTextureInfo &Info, FLOAT 
 
 	DWORD tileColor;
 	tileColor = 0xFFFFFFFF;
+
+	if (!(PolyFlags & PF_Modulated)) {
 #ifdef UTGLR_RUNE_BUILD
 	if (PolyFlags & PF_AlphaBlend) {
 		Color.W = Info.Texture->Alpha;
@@ -2306,6 +2308,7 @@ void UVulkanRenderDevice::DrawTile(FSceneNode *Frame, FTextureInfo &Info, FLOAT 
 #else
 	tileColor = FPlaneTo_BGRClamped_A255(&Color);
 #endif
+	}
 
 	FLOAT TexInfoUMult = 1.0f / (Info.UScale * Info.USize);
 	FLOAT TexInfoVMult = 1.0f / (Info.VScale * Info.VSize);
