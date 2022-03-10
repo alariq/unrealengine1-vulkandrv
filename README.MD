@@ -1,3 +1,8 @@
+**DISCLAIMER**: I cannot continue working on this project because of the war started by russia (f\*\*k you) in Ukraine.
+--
+
+
+
 Hello! This is my attempt to create a Vulkan renderer for old Unreal Engine based games (Rune, Unreal Tournament, etc.). Inspired by [kentie](https://kentie.net/article/d3d10drv/)
 
 This is a work in progress and I have no commitments.
